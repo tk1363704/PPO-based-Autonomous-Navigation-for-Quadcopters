@@ -9,7 +9,10 @@ class AirSimDroneEnv(gym.Env):
         self.sections = env_config["sections"]
 
         self.drone = airsim.MultirotorClient(ip=ip_address)
+        # gym.spaces.Box is a class provided by the OpenAI Gym library that represents a continuous space in a reinforcement learning environment. In RL, a "space" defines the possible values that state and action variables can take. The Box space is used when these variables can take on any real-valued number within a specified range.
+        # The space is image whose shape is (50, 50, 3) and value range is [0, 255];
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=self.image_shape, dtype=np.uint8)
+        # For instance, if you were working with a grid-world environment, these nine discrete actions might correspond to moving in different directions (e.g., up, down, left, right, or diagonally) or taking specific actions within the environment.
         self.action_space = gym.spaces.Discrete(9)
 
         self.info = {"collision": False}
@@ -35,6 +38,9 @@ class AirSimDroneEnv(gym.Env):
     def setup_flight(self):
         self.drone.reset()
         self.drone.enableApiControl(True)
+        # Arming a drone means preparing it for flight. When you arm a drone, you enable its propulsion system, allowing it to generate thrust and lift off the ground.
+        # Disarming a drone means shutting down its propulsion system and disabling its ability to generate thrust. This is typically done when you want to power down or land the drone safely.
+        # True to arm, False to disarm the vehicle
         self.drone.armDisarm(True)
 
         # Prevent drone from falling after reset
@@ -55,10 +61,15 @@ class AirSimDroneEnv(gym.Env):
 
         # Start the agent at random section at a random yz position
         y_pos, z_pos = ((np.random.rand(1,2)-0.5)*2).squeeze()
+        # airsim.Pose: This is a class provided by the AirSim library for defining the pose of an object. A pose typically includes information about its position and orientation.
+        # airsim.Vector3r(self.agent_start_pos, y_pos, z_pos): This part creates a Vector3r object, which represents a 3D vector. It's used to specify the position of the object. self.agent_start_pos is likely a variable or value representing the x-coordinate, y_pos is the y-coordinate, and z_pos is the z-coordinate.
         pose = airsim.Pose(airsim.Vector3r(self.agent_start_pos,y_pos,z_pos))
+        # Set the pose of the vehicle
         self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
         
         # Get target distance for reward calculation
+        # This line of code calculates the Euclidean distance between two 2D points: [y_pos, z_pos] and self.target_pos
+        # self.target_dist_prev: This variable is assigned the computed distance value. It seems to be used to store the previous distance between the two points, possibly for tracking changes in distance over time.
         self.target_dist_prev = np.linalg.norm(np.array([y_pos, z_pos]) - self.target_pos)
 
     def do_action(self, select_action):
@@ -83,9 +94,14 @@ class AirSimDroneEnv(gym.Env):
             vy, vz = (speed, speed)
 
         # Execute action
+        # vx (float): desired velocity in the X axis of the vehicle's local NED frame.
+        # vy (float): desired velocity in the Y axis of the vehicle's local NED frame.
+        # vz (float): desired velocity in the Z axis of the vehicle's local NED frame.
+        # duration (float): Desired amount of time (seconds), to send this command for
+        # call .join() to wait for method to finish.
         self.drone.moveByVelocityBodyFrameAsync(speed, vy, vz, duration=1).join()
-
-        # # Prevent swaying
+        # Prevent swaying
+        # If you want to control the vehicle's velocity in its own body frame, use moveByVelocityBodyFrameAsync. If you prefer to control the velocity in a global reference frame (e.g., for navigation or waypoint following), use moveByVelocityAsync.
         self.drone.moveByVelocityAsync(vx=0, vy=0, vz=0, duration=1)
 
     def get_obs(self):
@@ -131,7 +147,8 @@ class AirSimDroneEnv(gym.Env):
         # (target_dist_curr-0.3) : distance between agent and hole's end point
         # (3.7-agent_traveled_x) : distance between agent and wall
         # (3.7-agent_traveled_x)*sin(60) : end points that camera can capture
-        # FOV : 120 deg, sin(60) ~ 1.732 
+        # FOV : 120 deg, sin(60) ~ 1.732
+        # The condition being checked is (target_dist_curr-0.3) > (3.7-agent_traveled_x)*1.732. It's comparing the distance between the agent and the hole's end point with the distance between the agent and the wall scaled by the FOV. If the condition is true, it means that the hole has "disappeared" from the camera frame because it's farther away than the camera's FOV can capture.
         elif (target_dist_curr-0.3) > (3.7-agent_traveled_x)*1.732:
             reward = -100
             done = 1
@@ -144,6 +161,9 @@ class AirSimDroneEnv(gym.Env):
     
     def get_rgb_image(self):
         rgb_image_request = airsim.ImageRequest(0, airsim.ImageType.Scene, False, False)
+        # # camera control
+        # # simGetImage returns compressed png in array of bytes
+        # # image_type uses one of the ImageType members
         responses = self.drone.simGetImages([rgb_image_request])
         img1d = np.fromstring(responses[0].image_data_uint8, dtype=np.uint8)
         img2d = np.reshape(img1d, (responses[0].height, responses[0].width, 3)) 
