@@ -1,3 +1,6 @@
+import datetime
+import logging
+
 import gym
 import time
 import yaml
@@ -24,7 +27,8 @@ with open('scripts/config.yml', 'r') as f:
     gym.make(
         "scripts:airsim-env-v0", 
         ip_address="127.0.0.1", 
-        image_shape=(50,50,3),
+        # image_shape=(50,50,3),
+        image_shape=(144, 256, 3),
         env_config=env_config["TrainEnv"]
     )
 )])
@@ -61,7 +65,7 @@ kwargs["callback"] = callbacks
 log_name = "ppo_run_" + str(time.time())
 
 model.learn(
-    total_timesteps=150000,
+    total_timesteps=15000,
     tb_log_name=log_name,
     **kwargs
 )
