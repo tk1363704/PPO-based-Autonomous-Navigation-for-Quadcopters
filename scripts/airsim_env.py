@@ -1,5 +1,5 @@
 from . import airsim
-import gym
+import gymnasium as gym
 import numpy as np
 
 
@@ -22,12 +22,12 @@ class AirSimDroneEnv(gym.Env):
         self.do_action(action)
         obs, info = self.get_obs()
         reward, done = self.compute_reward()
-        return obs, reward, done, info
+        return obs, reward, done, False, info
 
-    def reset(self):
+    def reset(self, seed=None):
         self.setup_flight()
         obs, _ = self.get_obs()
-        return obs
+        return obs, {}
 
     def render(self):
         return self.get_obs()
@@ -140,7 +140,7 @@ class AirSimDroneEnv(gym.Env):
 
     def is_collision(self):
         current_collision_time = self.drone.simGetCollisionInfo().time_stamp
-        return True if current_collision_time != self.collision_time else False
+        return current_collision_time != self.collision_time
     
     def get_rgb_image(self):
         rgb_image_request = airsim.ImageRequest(0, airsim.ImageType.Scene, False, False)

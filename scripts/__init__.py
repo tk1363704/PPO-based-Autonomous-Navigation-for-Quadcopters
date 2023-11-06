@@ -1,6 +1,5 @@
 from .airsim_env import AirSimDroneEnv, TestEnv
-from gym.envs.registration import register
-
+from gymnasium.envs.registration import register
 
 # Register AirSim environment as a gym environment
 register(
