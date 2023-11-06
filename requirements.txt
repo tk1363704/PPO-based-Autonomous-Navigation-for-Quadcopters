@@ -39,6 +39,7 @@ tensorboard-plugin-wit
 torch
 tornado
 typing-extensions
+typer
 urllib3
 Werkzeug
 wincertstore
