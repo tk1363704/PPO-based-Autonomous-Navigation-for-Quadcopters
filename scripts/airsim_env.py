@@ -1,6 +1,9 @@
-from . import airsim
+from typing import Any
+
 import gymnasium as gym
 import numpy as np
+
+from . import airsim
 
 
 class AirSimDroneEnv(gym.Env):
@@ -33,6 +36,7 @@ class AirSimDroneEnv(gym.Env):
         self.random_start = True
         self.setup_flight()
         self.steps = 0
+        self.target_dist_prev = 0.0
 
     def step(self, action):
         # self.do_action(action)
@@ -41,7 +45,12 @@ class AirSimDroneEnv(gym.Env):
         reward, done = self.compute_reward()
         return obs, reward, done, False, info
 
-    def reset(self, seed=None):
+    def reset(
+        self,
+        *,
+        seed: int | None = None,
+        options: dict[str, Any] | None = None,
+    ):
         self.setup_flight()
         obs, _ = self.get_obs()
         return obs, {}
@@ -78,8 +87,8 @@ class AirSimDroneEnv(gym.Env):
         self.target_pos = section["target"]
 
         print("-----------A new flight!------------")
-        print("Start point is {}".format(self.agent_start_pos))
-        print("Target point is {}".format(self.target_pos))
+        print("Start point is {self.agent_start_pos}")
+        print("Target point is {self.target_pos}")
         print("-----------Start flying!------------")
         self.steps = 0
         start_x_pos, start_y_pos, start_z_pos = (
@@ -111,7 +120,7 @@ class AirSimDroneEnv(gym.Env):
         self.target_dist_prev = np.linalg.norm(
             np.array([start_x_pos, start_y_pos, start_z_pos]) - self.target_pos
         )
-        print("target_dist_prev: {}".format(self.target_dist_prev))
+        print(f"target_dist_prev: {self.target_dist_prev}")
 
     def do_action(self, select_action):
         speed = 0.4
@@ -209,11 +218,7 @@ class AirSimDroneEnv(gym.Env):
 
         self.target_dist_prev = target_dist_curr
         if self.steps % 10 == 0:
-            print(
-                "Steps {} -> target_dist_prev: {}".format(
-                    self.steps, self.target_dist_prev
-                )
-            )
+            print(f"Steps {self.steps} -> target_dist_prev: {self.target_dist_prev}")
 
         # # Get meters agent traveled
         # agent_traveled_x = np.abs(self.agent_start_pos - x)
@@ -271,7 +276,7 @@ class AirSimDroneEnv(gym.Env):
         #     reward = -100
         #     done = 1
         if done == 1 or self.steps % 10 == 0:
-            print("Steps {} -> reward: {}, done: {}".format(self.steps, reward, done))
+            print(f"Steps {self.steps} -> reward: {reward}, done: {done}")
         return reward, done
 
     def is_landing(self):
@@ -280,10 +285,7 @@ class AirSimDroneEnv(gym.Env):
         landing_threshold = -0.1  # You may need to adjust this value
         state = self.drone.getMultirotorState()
         position = state.kinematics_estimated.position
-        if position.z_val > landing_threshold:
-            return True
-        else:
-            return False
+        return position.z_val > landing_threshold
 
     def is_collision(self):
         current_collision_time = self.drone.simGetCollisionInfo().time_stamp
@@ -313,7 +315,7 @@ class AirSimDroneEnv(gym.Env):
         # Sometimes no image returns from api
         try:
             return img2d.reshape(self.image_shape)
-        except:
+        except:  # noqa: E722 # pylint: disable=bare-except
             return np.zeros((self.image_shape))
 
     def get_depth_image(self, thresh=2.0):
@@ -330,12 +332,12 @@ class AirSimDroneEnv(gym.Env):
 class TestEnv(AirSimDroneEnv):
     def __init__(self, ip_address, image_shape, env_config):
         self.eps_n = 0
-        super(TestEnv, self).__init__(ip_address, image_shape, env_config)
+        super().__init__(ip_address, image_shape, env_config)
         self.agent_traveled = []
         self.random_start = False
 
     def setup_flight(self):
-        super(TestEnv, self).setup_flight()
+        super().setup_flight()
         self.eps_n += 1
 
         # Start the agent at a random yz position
@@ -356,7 +358,7 @@ class TestEnv(AirSimDroneEnv):
         if done and self.eps_n % 5 == 0:
             print("---------------------------------")
             print("> Total episodes:", self.eps_n)
-            print("> Flight distance (mean): %.2f" % (np.mean(self.agent_traveled)))
+            print(f"> Flight distance (mean): {np.mean(self.agent_traveled):.2f}")
             print("> Holes reached (max):", int(np.max(self.agent_traveled) // 4))
             print("> Holes reached (mean):", int(np.mean(self.agent_traveled) // 4))
             print("---------------------------------\n")

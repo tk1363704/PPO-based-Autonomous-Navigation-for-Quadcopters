@@ -2,7 +2,7 @@ from __future__ import print_function
 import msgpackrpc  # install as admin: pip install msgpack-rpc-python
 import numpy as np  # pip install numpy
 import math
-
+from typing import Any, List
 
 class MsgpackMixin:
     def __repr__(self):
@@ -556,11 +556,11 @@ class MultirotorState(MsgpackMixin):
 
 class RotorStates(MsgpackMixin):
     timestamp = np.uint64(0)
-    rotors = []
+    rotors : List[Any] = []
 
 
 class ProjectionMatrix(MsgpackMixin):
-    matrix = []
+    matrix : List[Any] = []
 
 
 class CameraInfo(MsgpackMixin):
