@@ -118,7 +118,7 @@ Go to the [releases](https://github.com/bilalkabas/DQN-based-Autonomous-Navigati
 
 So, inside the repository
 ```
-python main.py
+python main.py train
 ```
 
 ## How to run the pretrained model?
@@ -133,7 +133,7 @@ Go to the [releases](https://github.com/bilalkabas/DQN-based-Autonomous-Navigati
 
 So, inside the repository
 ```
-python policy_run.py
+python main.py evaluate
 ```
 
 ## Training results
@@ -143,6 +143,17 @@ The trained model in `saved_policy` folder was trained for 280k steps.
 
 ## Test results
 The test environment has different textures and hole positions than that of the training environment. For 100 episodes, the trained model is able to travel 17.5 m on average and passes through 4 holes on average without any collision. The agent can pass through at most 9 holes in test environment without any collision.
+
+### Git hooks
+The CI will run several checks on the new code pushed to the repository. These checks can also be run locally without waiting for the CI by following the steps below:
+
+1. [install pre-commit](https://pre-commit.com/#install),
+2. Install the Git hooks by running `pre-commit install`.
+
+Once those two steps are done, the Git hooks will be run automatically at every new commit. The Git hooks can also be run manually with `pre-commit run --all-files`, and if needed they can be skipped (not recommended) with `git commit --no-verify`.
+
+> Note: when you commit, you may have to explicitly run `pre-commit run --all-files` twice to make it pass, as each formatting tool will first format the code and fail the first time but should pass the second time.
+
 
 ## Author
 
