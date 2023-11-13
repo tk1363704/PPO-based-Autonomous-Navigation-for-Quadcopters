@@ -43,7 +43,8 @@ class AirSimDroneEnv(gym.Env):
         self.do_action_moving_x(action)
         obs, info = self.get_obs()
         reward, done = self.compute_reward()
-        return obs, reward, done, False, info
+        truncated = self.steps > 200
+        return obs, reward, done, truncated, info
 
     def reset(
         self,
@@ -87,8 +88,8 @@ class AirSimDroneEnv(gym.Env):
         self.target_pos = section["target"]
 
         print("-----------A new flight!------------")
-        print("Start point is {self.agent_start_pos}")
-        print("Target point is {self.target_pos}")
+        print(f"Start point is {self.agent_start_pos}")
+        print(f"Target point is {self.target_pos}")
         print("-----------Start flying!------------")
         self.steps = 0
         start_x_pos, start_y_pos, start_z_pos = (
@@ -193,11 +194,10 @@ class AirSimDroneEnv(gym.Env):
         # e.g., for navigation or waypoint following), use moveByVelocityAsync.
         # self.drone.moveByVelocityAsync(vx=0, vy=0, vz=0, duration=1)
 
-        quad_vel = self.drone.getMultirotorState().kinematics_estimated.linear_velocity
         self.drone.moveByVelocityBodyFrameAsync(
-            quad_vel.x_val + quad_offset[0],
-            quad_vel.y_val + quad_offset[1],
-            quad_vel.z_val + quad_offset[2],
+            self.current_vel.x_val + quad_offset[0],
+            self.current_vel.y_val + quad_offset[1],
+            self.current_vel.z_val + quad_offset[2],
             duration=3,
         ).join()
 
@@ -206,14 +206,23 @@ class AirSimDroneEnv(gym.Env):
         obs = self.get_rgb_image()
         return obs, self.info
 
+    @property
+    def current_pose(self):
+        x, y, z = self.drone.simGetVehiclePose().position
+        return np.array([x, y, z])
+
+    @property
+    def current_vel(self):
+        return self.drone.getMultirotorState().kinematics_estimated.linear_velocity
+
     def compute_reward(self):
         reward = 0
         done = 0
         self.steps += 1
 
         # Target distance based reward
-        x, y, z = self.drone.simGetVehiclePose().position
-        target_dist_curr = np.linalg.norm(np.array([x, y, z]) - self.target_pos)
+        target_dist_curr = np.linalg.norm(self.current_pose - self.target_pos)
+        print("target_dist_curr: ", target_dist_curr)
         reward += (self.target_dist_prev - target_dist_curr) * 20
 
         self.target_dist_prev = target_dist_curr
@@ -341,15 +350,15 @@ class TestEnv(AirSimDroneEnv):
         self.eps_n += 1
 
         # Start the agent at a random yz position
-        y_pos, z_pos = (0, 0)
-        pose = airsim.Pose(airsim.Vector3r(self.agent_start_pos, y_pos, z_pos))
+        # y_pos, z_pos = (0, 0)
+        pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
         self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
 
     def compute_reward(self):
         reward = 0
         done = 0
 
-        x, _, _ = self.drone.simGetVehiclePose().position
+        x, _, _ = self.current_pose
 
         if self.is_collision():
             done = 1

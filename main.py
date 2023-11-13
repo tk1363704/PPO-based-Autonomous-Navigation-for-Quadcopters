@@ -33,7 +33,7 @@ def evaluate(
         [
             lambda: Monitor(
                 gymnasium.make(
-                    "scripts:test-env-v0",
+                    "scripts:airsim-env-v0",
                     ip_address=sim_ip,
                     image_shape=(50, 50, 3),
                     env_config=env_config["TrainEnv"],
