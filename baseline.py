@@ -56,7 +56,7 @@ def main(
     goal = env.target_pos
     gain = 1
     succ = 0
-    for _ in range(100):
+    for nt in range(100):
         for _ in range(200):
             # interface with the weird current actions
             velocity_desired = gain * (goal - env.get_wrapper_attr("current_pose"))
@@ -81,7 +81,7 @@ def main(
             print("Reward: ", reward)
             print("done: ", done)
 
-            print("succ: ", succ)
+            print("succ: ", succ, "num trials: ", nt)
 
 
 if __name__ == "__main__":
