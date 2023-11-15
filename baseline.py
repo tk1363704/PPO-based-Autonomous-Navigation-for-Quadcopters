@@ -7,6 +7,7 @@ from typing_extensions import Annotated
 
 import gymnasium
 import numpy as np
+from scripts.airsim_env import TrainConfig
 
 current_file_path = Path(__file__).parent
 
@@ -14,7 +15,7 @@ app = typer.Typer()
 
 
 @app.command()
-def main(
+def position(
     config_file: Annotated[Path, typer.Option()] = Path(
         current_file_path / "scripts/config.yml"
     ),
@@ -23,40 +24,43 @@ def main(
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
         env_config = yaml.safe_load(f)
+        config = TrainConfig(**env_config["TrainEnv"])
 
     env = gymnasium.make(
         "scripts:airsim-env-v0",
         ip_address=sim_ip,
-        image_shape=(50, 50, 3),
-        env_config=env_config["TrainEnv"],
+        env_config=config,
+    )
+    for _ in range(100):
+        env.reset()
+        goal = env.target_pos
+        env.move_to_pos(goal)
+
+
+@app.command()
+def velocity(
+    config_file: Annotated[Path, typer.Option()] = Path(
+        current_file_path / "scripts/config.yml"
+    ),
+    sim_ip: Annotated[str, typer.Option()] = "127.0.0.1",
+):
+    # Get train environment configs
+    with open(config_file, "r", encoding="utf8") as f:
+        env_config = yaml.safe_load(f)
+        config = TrainConfig(**env_config["TrainEnv"])
+
+    env = gymnasium.make(
+        "scripts:airsim-env-v0",
+        ip_address=sim_ip,
+        env_config=config,
     )
 
-    # if select_action == 0:
-    #     quad_offset = (speed, 0, 0)
-    #     # print('Left!!!')
-    # elif select_action == 1:
-    #     quad_offset = (0, speed, 0)
-    #     # print('Forward!!!')
-    # elif select_action == 2:
-    #     quad_offset = (0, 0, speed)
-    #     # print('Down!!!')
-    # elif select_action == 3:
-    #     quad_offset = (-speed, 0, 0)
-    #     # print('Right!!!')
-    # elif select_action == 4:
-    #     quad_offset = (0, -speed, 0)
-    #     # print('Back!!!')
-    # elif select_action == 5:
-    #     quad_offset = (0, 0, -speed)
-    #     # print('Up!!!')
-    # else:
-    #     quad_offset = (0, 0, 0)
-
     env.reset()
-    goal = env.target_pos
     gain = 1
     succ = 0
     for nt in range(100):
+        env.reset()
+        goal = env.target_pos
         for _ in range(200):
             # interface with the weird current actions
             velocity_desired = gain * (goal - env.get_wrapper_attr("current_pose"))
@@ -69,6 +73,7 @@ def main(
             max_index = np.argmax(np.abs(delta_vel))
             if delta_vel[max_index] < 0:
                 max_index += 3
+
             _, reward, done, _, _ = env.step(max_index)
             if done:
                 if reward > 100:

@@ -44,6 +44,10 @@ class AirSimDroneEnv(gym.Env):
                     low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
                     high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
                 ),
+                "relative_speed": gym.spaces.Box(
+                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
+                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
+                ),
             }
         )
 
@@ -213,8 +217,13 @@ class AirSimDroneEnv(gym.Env):
 
         self.drone.moveByVelocityBodyFrameAsync(
             *new_vel,
-            duration=3,
+            duration=0.03,
         ).join()
+
+        # self.drone.step()
+
+    def move_to_pos(self, goal):
+        self.drone.moveToPositionAsync(*goal, velocity=1.5).join()
 
     def get_obs(self):
         info = {"collision": self.is_collision()}
@@ -222,6 +231,7 @@ class AirSimDroneEnv(gym.Env):
             "rgb_image": self.get_rgb_image(),
             "goal": self.target_pos,
             "target": self.current_pose,
+            "relative_speed": self.current_vel,
         }
         return obs, info
 
