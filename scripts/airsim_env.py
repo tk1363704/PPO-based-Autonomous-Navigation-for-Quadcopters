@@ -1,49 +1,76 @@
-from typing import Any
-
+from typing import Any, List, Tuple
+from dataclasses import dataclass
 import gymnasium as gym
 import numpy as np
-
 from . import airsim
 
 
+@dataclass
+class Section:
+    target: List[float]
+    offset: List[float]
+
+
+@dataclass
+class TrainConfig:
+    sections: List[Section]
+
+    def __post_init__(self):
+        if isinstance(self.sections[0], dict):
+            self.sections = [Section(**sec) for sec in self.sections]
+
+
 class AirSimDroneEnv(gym.Env):
-    def __init__(self, ip_address, image_shape, env_config):
-        self.image_shape = image_shape
-        self.sections = env_config["sections"]
+    def __init__(
+        self,
+        ip_address: str,
+        env_config: TrainConfig,
+    ):
+        self.sections = env_config.sections
 
         self.drone = airsim.MultirotorClient(ip=ip_address)
-        # gym.spaces.Box is a class provided by the OpenAI Gym library that
-        # represents a continuous space in a reinforcement learning environment.
-        # In RL, a "space" defines the possible values that state and action
-        # variables can take. The Box space is used when these variables can
-        # take on any real-valued number within a specified range.
+        rgb_shape = self.get_rgb_image().shape
 
-        # The space is image whose shape is (50, 50, 3) and value range is
-        # [0, 255];
-        self.observation_space = gym.spaces.Box(
-            low=0, high=255, shape=self.image_shape, dtype=np.uint8
+        self.observation_space = gym.spaces.Dict(
+            {
+                "rgb_image": gym.spaces.Box(
+                    low=0, high=255, shape=rgb_shape, dtype=np.uint8
+                ),
+                "goal": gym.spaces.Box(
+                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
+                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
+                ),
+                "target": gym.spaces.Box(
+                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
+                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
+                ),
+                "relative_speed": gym.spaces.Box(
+                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
+                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
+                ),
+            }
         )
+
         # For instance, if you were working with a grid-world environment, these
         # nine discrete actions might correspond to moving in different
         # directions (e.g., up, down, left, right, or diagonally) or taking
         # specific actions within the environment.
-        # self.action_space = gym.spaces.Discrete(9)
         self.action_space = gym.spaces.Discrete(7)
 
-        self.info = {"collision": False}
-
-        self.collision_time = 0
         self.random_start = True
         self.setup_flight()
+
         self.steps = 0
         self.target_dist_prev = 0.0
+        self.collision_time = -1
 
     def step(self, action):
         # self.do_action(action)
         self.do_action_moving_x(action)
         obs, info = self.get_obs()
         reward, done = self.compute_reward()
-        return obs, reward, done, False, info
+        truncated = self.steps > 200
+        return obs, reward, done, truncated, info
 
     def reset(
         self,
@@ -83,19 +110,14 @@ class AirSimDroneEnv(gym.Env):
             self.target_pos_idx = 0
 
         section = self.sections[self.target_pos_idx]
-        self.agent_start_pos = section["offset"]
-        self.target_pos = section["target"]
+        self.agent_start_pos = np.array(section.offset, dtype=np.float64)
+        self.target_pos = np.array(section.target, dtype=np.float64)
 
         print("-----------A new flight!------------")
-        print("Start point is {self.agent_start_pos}")
-        print("Target point is {self.target_pos}")
+        print(f"Start point is {self.agent_start_pos}")
+        print(f"Target point is {self.target_pos}")
         print("-----------Start flying!------------")
         self.steps = 0
-        start_x_pos, start_y_pos, start_z_pos = (
-            self.agent_start_pos[0],
-            self.agent_start_pos[1],
-            self.agent_start_pos[2],
-        )
 
         # # Start the agent at random section at a random yz position
         # y_pos, z_pos = ((np.random.rand(1,2)-0.5)*2).squeeze()
@@ -107,7 +129,7 @@ class AirSimDroneEnv(gym.Env):
         # the position of the object. self.agent_start_pos is likely a variable
         # or value representing the x-coordinate, y_pos is the y-coordinate,
         # and z_pos is the z-coordinate.
-        pose = airsim.Pose(airsim.Vector3r(start_x_pos, start_y_pos, start_z_pos))
+        pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
         # Set the pose of the vehicle
         self.drone.simSetVehiclePose(pose=pose, ignore_collision=False)
 
@@ -117,9 +139,7 @@ class AirSimDroneEnv(gym.Env):
         # self.target_dist_prev: This variable is assigned the computed distance
         # value. It seems to be used to store the previous distance between the
         # two points, possibly for tracking changes in distance over time.
-        self.target_dist_prev = np.linalg.norm(
-            np.array([start_x_pos, start_y_pos, start_z_pos]) - self.target_pos
-        )
+        self.target_dist_prev = np.linalg.norm(self.agent_start_pos - self.target_pos)
         print(f"target_dist_prev: {self.target_dist_prev}")
 
     def do_action(self, select_action):
@@ -193,27 +213,46 @@ class AirSimDroneEnv(gym.Env):
         # e.g., for navigation or waypoint following), use moveByVelocityAsync.
         # self.drone.moveByVelocityAsync(vx=0, vy=0, vz=0, duration=1)
 
-        quad_vel = self.drone.getMultirotorState().kinematics_estimated.linear_velocity
+        new_vel = self.current_vel + quad_offset
+
         self.drone.moveByVelocityBodyFrameAsync(
-            quad_vel.x_val + quad_offset[0],
-            quad_vel.y_val + quad_offset[1],
-            quad_vel.z_val + quad_offset[2],
-            duration=3,
+            *new_vel,
+            duration=0.03,
         ).join()
 
-    def get_obs(self):
-        self.info["collision"] = self.is_collision()
-        obs = self.get_rgb_image()
-        return obs, self.info
+        # self.drone.step()
 
-    def compute_reward(self):
-        reward = 0
-        done = 0
+    def move_to_pos(self, goal):
+        self.drone.moveToPositionAsync(*goal, velocity=1.5).join()
+
+    def get_obs(self):
+        info = {"collision": self.is_collision()}
+        obs = {
+            "rgb_image": self.get_rgb_image(),
+            "goal": self.target_pos,
+            "target": self.current_pose,
+            "relative_speed": self.current_vel,
+        }
+        return obs, info
+
+    @property
+    def current_pose(self):
+        x, y, z = self.drone.simGetVehiclePose().position
+        return np.array([x, y, z], dtype=np.float64)
+
+    @property
+    def current_vel(self):
+        vel = self.drone.getMultirotorState().kinematics_estimated.linear_velocity
+        return np.array([vel.x_val, vel.y_val, vel.z_val])
+
+    def compute_reward(self) -> Tuple[float, bool]:
+        reward = 0.0
+        done = False
         self.steps += 1
 
         # Target distance based reward
-        x, y, z = self.drone.simGetVehiclePose().position
-        target_dist_curr = np.linalg.norm(np.array([x, y, z]) - self.target_pos)
+        target_dist_curr = float(np.linalg.norm(self.current_pose - self.target_pos))
+        print("target_dist_curr: ", target_dist_curr)
         reward += (self.target_dist_prev - target_dist_curr) * 20
 
         self.target_dist_prev = target_dist_curr
@@ -236,29 +275,29 @@ class AirSimDroneEnv(gym.Env):
         # Collision penalty
         if self.is_collision():
             print("The drone has collided with the obstacle!!!")
-            reward = -100
-            done = 1
+            reward = -100.0
+            done = True
 
         # # Check if agent passed through the hole
         # elif agent_traveled_x > 3.7:
         #     reward += 10
-        #     done = 1
+        #     done = True
 
         elif target_dist_curr < 0.87:
             print("The drone has reached the target!!!")
             reward += 100
-            done = 1
+            done = True
 
         # Check if the drone's altitude is less than the landing threshold
         elif self.is_landing():
             print("Drone has touched the ground!!!")
-            reward = -100
-            done = 1
+            reward = -100.0
+            done = True
 
         elif target_dist_curr >= 50:
             print("The drone has flown out of the specified range!!!")
             reward += -50
-            done = 1
+            done = True
 
         # Check if the hole disappeared from camera frame
         # (target_dist_curr-0.3) : distance between agent and hole's end point
@@ -274,7 +313,7 @@ class AirSimDroneEnv(gym.Env):
         # FOV can capture.
         # elif (target_dist_curr-0.3) > (3.7-agent_traveled_x)*1.732:
         #     reward = -100
-        #     done = 1
+        #     done = True
         if done == 1 or self.steps % 10 == 0:
             print(f"Steps {self.steps} -> reward: {reward}, done: {done}")
         return reward, done
@@ -303,36 +342,34 @@ class AirSimDroneEnv(gym.Env):
             print("collided!!!!")
         return flag
 
-    def get_rgb_image(self):
+    def get_rgb_image(self) -> np.ndarray:
         rgb_image_request = airsim.ImageRequest(0, airsim.ImageType.Scene, False, False)
         # # camera control
         # # simGetImage returns compressed png in array of bytes
         # # image_type uses one of the ImageType members
         responses = self.drone.simGetImages([rgb_image_request])
-        img1d = np.fromstring(responses[0].image_data_uint8, dtype=np.uint8)
+        img1d = np.fromstring(  # type: ignore
+            responses[0].image_data_uint8, dtype=np.uint8
+        )
         img2d = np.reshape(img1d, (responses[0].height, responses[0].width, 3))
+        img_rgb = np.flipud(img2d)
+        return img_rgb
 
-        # Sometimes no image returns from api
-        try:
-            return img2d.reshape(self.image_shape)
-        except:  # noqa: E722 # pylint: disable=bare-except
-            return np.zeros((self.image_shape))
-
-    def get_depth_image(self, thresh=2.0):
+    def get_depth_image(self, thresh=2.0) -> np.ndarray:
         depth_image_request = airsim.ImageRequest(
             1, airsim.ImageType.DepthPerspective, True, False
         )
         responses = self.drone.simGetImages([depth_image_request])
-        depth_image = np.array(responses[0].image_data_float, dtype=np.float32)
+        depth_image = np.array(responses[0].image_data_float, dtype=np.float64)
         depth_image = np.reshape(depth_image, (responses[0].height, responses[0].width))
         depth_image[depth_image > thresh] = thresh
         return depth_image
 
 
 class TestEnv(AirSimDroneEnv):
-    def __init__(self, ip_address, image_shape, env_config):
+    def __init__(self, ip_address, env_config):
         self.eps_n = 0
-        super().__init__(ip_address, image_shape, env_config)
+        super().__init__(ip_address, env_config)
         self.agent_traveled = []
         self.random_start = False
 
@@ -341,15 +378,15 @@ class TestEnv(AirSimDroneEnv):
         self.eps_n += 1
 
         # Start the agent at a random yz position
-        y_pos, z_pos = (0, 0)
-        pose = airsim.Pose(airsim.Vector3r(self.agent_start_pos, y_pos, z_pos))
+        # y_pos, z_pos = (0, 0)
+        pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
         self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
 
     def compute_reward(self):
         reward = 0
         done = 0
 
-        x, _, _ = self.drone.simGetVehiclePose().position
+        x, _, _ = self.current_pose
 
         if self.is_collision():
             done = 1
