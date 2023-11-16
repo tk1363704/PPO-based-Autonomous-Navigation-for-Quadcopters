@@ -5,6 +5,7 @@ import time
 import yaml
 
 import typer
+
 from typing_extensions import Annotated
 
 import gymnasium
@@ -14,26 +15,33 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.callbacks import EvalCallback
 
+from scripts.airsim_env import TrainConfig
+
 
 app = typer.Typer()
+
+current_file_path = Path(__file__).parent
 
 
 @app.command()
 def evaluate(
-    config_file: Annotated[Path, typer.Option()] = Path("scripts/config.yml"),
+    config_file: Annotated[Path, typer.Option()] = Path(
+        current_file_path / "scripts/config.yml"
+    ),
     sim_ip: Annotated[str, typer.Option()] = "127.0.0.1",
     run_steps: Annotated[int, typer.Option()] = 1000,
 ):
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
         env_config = yaml.safe_load(f)
+        config = TrainConfig(**env_config)
 
     # Create a DummyVecEnv
     env = DummyVecEnv(
         [
             lambda: Monitor(
                 gymnasium.make(
-                    "scripts:test-env-v0",
+                    "scripts:airsim-env-v0",
                     ip_address=sim_ip,
                     image_shape=(144, 256, 3),
                     env_config=env_config["TrainEnv"],
@@ -57,13 +65,17 @@ def evaluate(
 
 @app.command()
 def train(
-    config_file: Annotated[Path, typer.Option()] = Path("scripts/config.yml"),
+    config_file: Annotated[Path, typer.Option()] = Path(
+        current_file_path / "scripts/config.yml"
+    ),
     sim_ip: Annotated[str, typer.Option()] = "127.0.0.1",
     train_timesteps: Annotated[int, typer.Option()] = 1000,
+    seed: Annotated[int, typer.Option()] = 42,
 ):
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
         env_config = yaml.safe_load(f)
+        config = TrainConfig(**env_config["TrainEnv"])
 
     # Create a DummyVecEnv
     # DummyVecEnv: This is a class provided by the stable-baselines library,
@@ -93,8 +105,7 @@ def train(
                 gymnasium.make(
                     "scripts:airsim-env-v0",
                     ip_address=sim_ip,
-                    image_shape=(50, 50, 3),
-                    env_config=env_config["TrainEnv"],
+                    env_config=config,
                 )
             )
         ]
@@ -108,7 +119,7 @@ def train(
         "MultiInputPolicy",
         env,
         verbose=1,
-        seed=42,
+        seed=seed,
         device="cuda",
         tensorboard_log="./tb_logs/",
     )
