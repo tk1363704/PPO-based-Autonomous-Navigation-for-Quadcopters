@@ -35,7 +35,7 @@ def evaluate(
                 gymnasium.make(
                     "scripts:test-env-v0",
                     ip_address=sim_ip,
-                    image_shape=(50, 50, 3),
+                    image_shape=(144, 256, 3),
                     env_config=env_config["TrainEnv"],
                 )
             )
@@ -105,7 +105,7 @@ def train(
 
     # Initialize PPO
     model = PPO(
-        "CnnPolicy",
+        "MultiInputPolicy",
         env,
         verbose=1,
         seed=42,
@@ -140,6 +140,31 @@ def train(
     # Save policy weights
     model.save("ppo_navigation_policy")
 
+@app.command()
+def test(config_file: Annotated[Path, typer.Option()] = Path("/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/scripts/config.yml"),
+    sim_ip: Annotated[str, typer.Option()] = "127.0.0.1"
+    ):
+    # Get train environment configs
+    with open(config_file, "r", encoding="utf8") as f:
+        env_config = yaml.safe_load(f)
+
+    env = DummyVecEnv(
+        [
+            lambda: Monitor(
+                gymnasium.make(
+                    "scripts:airsim-env-v0",
+                    ip_address=sim_ip,
+                    image_shape=(144, 256, 3),
+                    env_config=env_config["TrainEnv"],
+                )
+            )
+        ]
+    )
+    import time
+    for i in range(30):
+        env.reset()
+        time.sleep(5)
 
 if __name__ == "__main__":
-    app()
+    # app()
+    test()
