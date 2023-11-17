@@ -38,6 +38,7 @@ class AirSimDroneEnv(gym.Env):
             self.map = binvox_rw.read_as_3d_array(f)        
 
         self.drone = airsim.MultirotorClient(ip=ip_address)
+        rgb_shape = self.get_rgb_image().shape
         # gym.spaces.Box is a class provided by the OpenAI Gym library that
         # represents a continuous space in a reinforcement learning environment.
         # In RL, a "space" defines the possible values that state and action
@@ -48,9 +49,8 @@ class AirSimDroneEnv(gym.Env):
         # [0, 255];
         observation_space = OrderedDict()
         observation_space["goal_obs"] = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
-        observation_space["image_obs"] = gym.spaces.Box(low=0, high=255, shape=self.image_shape, dtype=np.uint8)
+        observation_space["image_obs"] = gym.spaces.Box(low=0, high=255, shape=rgb_shape, dtype=np.uint8)
         self.observation_space = gym.spaces.Dict(observation_space)
-        # self.observation_space = gym.spaces.Box(low=0, high=255, shape=self.image_shape, dtype=np.uint8)
 
         # For instance, if you were working with a grid-world environment, these
         # nine discrete actions might correspond to moving in different
@@ -140,8 +140,8 @@ class AirSimDroneEnv(gym.Env):
         
         start_pos, goal_pos = self.sample_start_goal_pos()
 
-        self.agent_start_pos = start_pos
-        self.target_pos = goal_pos
+        self.agent_start_pos = np.array(start_pos, dtype=np.float64)
+        self.target_pos = np.array(goal_pos, dtype=np.float64)
 
         print("-----------A new flight!------------")
         print(f"Start point is {self.agent_start_pos}")
@@ -265,15 +265,15 @@ class AirSimDroneEnv(gym.Env):
         self.drone.moveToPositionAsync(*goal, velocity=1.5).join()
 
     def get_obs(self):
-        self.info["collision"] = self.is_collision()
+        info = {"collision": self.is_collision()}
+
         obs = OrderedDict()
         obs["image_obs"] = self.get_rgb_image()
-
         current_pos = [self.drone.simGetVehiclePose().position.x_val, self.drone.simGetVehiclePose().position.y_val, self.drone.simGetVehiclePose().position.z_val]
         goal_obs = [x - y for x, y in zip(self.target_pos, current_pos)]
         obs["goal_obs"] = goal_obs
 
-        return obs, self.info
+        return obs, info
 
     @property
     def current_vel(self):

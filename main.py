@@ -43,7 +43,6 @@ def evaluate(
                 gymnasium.make(
                     "scripts:airsim-env-v0",
                     ip_address=sim_ip,
-                    image_shape=(144, 256, 3),
                     env_config=env_config["TrainEnv"],
                 )
             )
@@ -158,6 +157,7 @@ def test(config_file: Annotated[Path, typer.Option()] = Path("/home/nick/Dev/Air
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
         env_config = yaml.safe_load(f)
+        config = TrainConfig(**env_config["TrainEnv"])
 
     env = DummyVecEnv(
         [
@@ -165,8 +165,7 @@ def test(config_file: Annotated[Path, typer.Option()] = Path("/home/nick/Dev/Air
                 gymnasium.make(
                     "scripts:airsim-env-v0",
                     ip_address=sim_ip,
-                    image_shape=(144, 256, 3),
-                    env_config=env_config["TrainEnv"],
+                    env_config=config,
                 )
             )
         ]
