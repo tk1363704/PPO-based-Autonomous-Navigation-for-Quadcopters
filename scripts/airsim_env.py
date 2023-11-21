@@ -1,8 +1,13 @@
 from typing import Any, List, Tuple
 from dataclasses import dataclass
+
+# from pathlib import Path
+
 import gymnasium as gym
 import numpy as np
 from . import airsim
+
+# import binvox
 
 
 @dataclass
@@ -30,6 +35,13 @@ class AirSimDroneEnv(gym.Env):
 
         self.drone = airsim.MultirotorClient(ip=ip_address)
         rgb_shape = self.get_rgb_image().shape
+
+        self.drone.simPause(True)
+
+        # center = airsim.Vector3r(0, 0, 0)
+        # output_path = Path.cwd() / "map.binvox"
+        # self.drone.simCreateVoxelGrid(center, 100, 100, 100, 0.5, str(output_path))
+        # vox = binvox.Binvox.read(output_path, "sparse").numpy()
 
         self.observation_space = gym.spaces.Dict(
             {
@@ -65,12 +77,20 @@ class AirSimDroneEnv(gym.Env):
         self.collision_time = -1
 
     def step(self, action):
-        # self.do_action(action)
-        self.do_action_moving_x(action)
+        self.drone.simPause(False)
+        self.set_velocity(action)
+        self.drone.simPause(True)
+
         obs, info = self.get_obs()
         reward, done = self.compute_reward()
         truncated = self.steps > 200
         return obs, reward, done, truncated, info
+
+    def set_velocity(self, action):
+        self.drone.moveByVelocityAsync(
+            *action,
+            duration=1,
+        ).join()
 
     def reset(
         self,
