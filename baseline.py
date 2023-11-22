@@ -7,7 +7,6 @@ import typer
 from typing_extensions import Annotated
 
 import gymnasium
-import numpy as np
 from scripts.airsim_env import TrainConfig
 
 # import cv2
@@ -80,27 +79,38 @@ def velocity(
     state = BaselineState.MOVE_UP
 
     env.reset()
-    # gain = 1
+    gain = 1.0
     succ = 0
     for nt in range(100):
         env.reset()
         goal = env.target_pos
         state = BaselineState.MOVE_UP
+        max_error = 5.0
         for _ in range(200):
+            current_pose = env.get_wrapper_attr("current_pose")
             # interface with the weird current actions
             if state == BaselineState.MOVE_UP:
-                current = env.get_wrapper_attr("current_pose")
-                goal_ = [current[0], current[1], 140]
+                goal_ = [current_pose[0], current_pose[1], -20]
+                max_error = 5.0
+                gain = 1.0
             elif state == BaselineState.MOVE_ACROSS:
-                goal_ = [goal[0], goal[1], 140]
+                goal_ = [goal[0], goal[1], -20]
+                max_error = 1.0
+                gain = 0.25
             elif state == BaselineState.MOVE_DOWN:
                 goal_ = goal
+                gain = 0.25
+                max_error = 0.0
 
-            # velocity_desired = gain * (goal_ - env.get_wrapper_attr("current_pose"))
-            print("goal_", goal)
+            print(state)
+            print("current_pose: ", current_pose)
+            print("goal_: ", goal_)
+            print("error: ", ((goal_ - current_pose) ** 2))
+
+            velocity_desired = gain * (goal_ - current_pose)
             # print("velocity_desired", velocity_desired)
-            velocity_desired = np.array([0.0, 0.0, 100.0])
-            if ((goal_ - env.get_wrapper_attr("current_pose")) ** 2).sum() < 5:
+            # velocity_desired = np.array([0.0, 0.0, -100.0])
+            if ((goal_ - current_pose) ** 2).sum() < max_error:
                 state = state.succ()
 
             _, reward, done, _, _ = env.step(velocity_desired)

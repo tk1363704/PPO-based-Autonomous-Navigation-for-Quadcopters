@@ -303,7 +303,7 @@ class AirSimDroneEnv(gym.Env):
         #     reward += 10
         #     done = True
 
-        elif target_dist_curr < 0.87:
+        elif target_dist_curr < 0.087:
             print("The drone has reached the target!!!")
             reward += 100
             done = True
@@ -314,10 +314,10 @@ class AirSimDroneEnv(gym.Env):
             reward = -100.0
             done = True
 
-        elif target_dist_curr >= 50:
-            print("The drone has flown out of the specified range!!!")
-            reward += -50
-            done = True
+        # elif target_dist_curr >= 50:
+        #     print("The drone has flown out of the specified range!!!")
+        #     reward += -50
+        #     done = True
 
         # Check if the hole disappeared from camera frame
         # (target_dist_curr-0.3) : distance between agent and hole's end point
