@@ -81,8 +81,8 @@ class AirSimDroneEnv(gym.Env):
             self.action_space = gym.spaces.Discrete(7)
         elif self.action_type == ActionType.CONTINUOUS_VELOCITY:
             self.action_space = gym.spaces.Box(
-                np.array([-np.inf, -np.inf, -np.inf]),
-                np.array([np.inf, np.inf, np.inf]),
+                np.array([-1.0, -1.0, -1.0], dtype=np.float32),
+                np.array([1.0, 1.0, 1.0], dtype=np.float32),
             )
         else:
             raise ValueError("Invalid Action Type!")
@@ -112,6 +112,7 @@ class AirSimDroneEnv(gym.Env):
         return obs, reward, done, truncated, info
 
     def set_velocity(self, action):
+        action = np.clip(action, -1.0, 1.0)
         self.drone.moveByVelocityAsync(
             *action,
             duration=self.sim_dt,
