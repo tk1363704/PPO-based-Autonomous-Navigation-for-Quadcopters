@@ -8,6 +8,7 @@ from typing_extensions import Annotated
 
 import gymnasium
 from scripts.airsim_env import TrainConfig
+from scripts.airsim_env import ActionType
 
 # import cv2
 
@@ -74,6 +75,8 @@ def velocity(
         "scripts:airsim-env-v0",
         ip_address=sim_ip,
         env_config=config,
+        action_type=ActionType.CONTINUOUS_VELOCITY,
+        sim_dt=1.0,
     )
 
     state = BaselineState.MOVE_UP
@@ -88,7 +91,6 @@ def velocity(
         max_error = 5.0
         for _ in range(200):
             current_pose = env.get_wrapper_attr("current_pose")
-            # interface with the weird current actions
             if state == BaselineState.MOVE_UP:
                 goal_ = [current_pose[0], current_pose[1], -20]
                 max_error = 5.0
@@ -102,28 +104,19 @@ def velocity(
                 gain = 0.25
                 max_error = 0.0
 
-            print(state)
-            print("current_pose: ", current_pose)
-            print("goal_: ", goal_)
-            print("error: ", ((goal_ - current_pose) ** 2))
-
             velocity_desired = gain * (goal_ - current_pose)
-            # print("velocity_desired", velocity_desired)
-            # velocity_desired = np.array([0.0, 0.0, -100.0])
             if ((goal_ - current_pose) ** 2).sum() < max_error:
                 state = state.succ()
 
             _, reward, done, _, _ = env.step(velocity_desired)
-            # img = env.get_depth_image() / 2.0
-            # cv2.imshow("depth_image", img)
-            # cv2.waitKey(1)
-            # input()
+
             if done:
                 if reward > 100:
                     print("succesful!!")
                     succ += 1
                 env.reset()
                 break
+
             print("delta_vel: ", velocity_desired)
             print("Reward: ", reward)
             print("done: ", done)

@@ -1,5 +1,6 @@
 from typing import Any, List, Tuple
 from dataclasses import dataclass
+from enum import Enum
 
 # from pathlib import Path
 
@@ -25,11 +26,18 @@ class TrainConfig:
             self.sections = [Section(**sec) for sec in self.sections]
 
 
+class ActionType(Enum):
+    DISCRETE = 0
+    CONTINUOUS_VELOCITY = 1
+
+
 class AirSimDroneEnv(gym.Env):
     def __init__(
         self,
         ip_address: str,
         env_config: TrainConfig,
+        action_type: ActionType,
+        sim_dt: float,
     ):
         self.sections = env_config.sections
 
@@ -67,7 +75,17 @@ class AirSimDroneEnv(gym.Env):
         # nine discrete actions might correspond to moving in different
         # directions (e.g., up, down, left, right, or diagonally) or taking
         # specific actions within the environment.
-        self.action_space = gym.spaces.Discrete(7)
+        self.action_type = action_type
+        self.sim_dt = sim_dt
+        if self.action_type == ActionType.DISCRETE:
+            self.action_space = gym.spaces.Discrete(7)
+        elif self.action_type == ActionType.CONTINUOUS_VELOCITY:
+            self.action_space = gym.spaces.Box(
+                np.array([-np.inf, -np.inf, -np.inf]),
+                np.array([np.inf, np.inf, np.inf]),
+            )
+        else:
+            raise ValueError("Invalid Action Type!")
 
         self.random_start = True
         self.setup_flight()
@@ -78,7 +96,14 @@ class AirSimDroneEnv(gym.Env):
 
     def step(self, action):
         self.drone.simPause(False)
-        self.set_velocity(action)
+
+        if self.action_type == ActionType.DISCRETE:
+            self.do_action_moving_x(action)
+        elif self.action_type == ActionType.CONTINUOUS_VELOCITY:
+            self.set_velocity(action)
+        else:
+            raise ValueError("Invalid Action Type!")
+
         self.drone.simPause(True)
 
         obs, info = self.get_obs()
@@ -89,7 +114,7 @@ class AirSimDroneEnv(gym.Env):
     def set_velocity(self, action):
         self.drone.moveByVelocityAsync(
             *action,
-            duration=1,
+            duration=self.sim_dt,
         ).join()
 
     def reset(
@@ -189,7 +214,9 @@ class AirSimDroneEnv(gym.Env):
         # vz (float): desired velocity (Z axis) in vehicle's local NED frame.
         # duration (float): Desired amount of time (seconds), to send this command for
         # call .join() to wait for method to finish.
-        self.drone.moveByVelocityBodyFrameAsync(speed, vy, vz, duration=1).join()
+        self.drone.moveByVelocityBodyFrameAsync(
+            speed, vy, vz, duration=self.sim_dt
+        ).join()
         # Prevent swaying
         # If you want to control the vehicle's velocity in its own body frame,
         # use moveByVelocityBodyFrameAsync. If you prefer to control the
@@ -237,7 +264,7 @@ class AirSimDroneEnv(gym.Env):
 
         self.drone.moveByVelocityBodyFrameAsync(
             *new_vel,
-            duration=0.03,
+            duration=self.sim_dt,
         ).join()
 
         # self.drone.step()
@@ -384,40 +411,3 @@ class AirSimDroneEnv(gym.Env):
         depth_image = np.reshape(depth_image, (responses[0].height, responses[0].width))
         depth_image[depth_image > thresh] = thresh
         return depth_image
-
-
-class TestEnv(AirSimDroneEnv):
-    def __init__(self, ip_address, env_config):
-        self.eps_n = 0
-        super().__init__(ip_address, env_config)
-        self.agent_traveled = []
-        self.random_start = False
-
-    def setup_flight(self):
-        super().setup_flight()
-        self.eps_n += 1
-
-        # Start the agent at a random yz position
-        # y_pos, z_pos = (0, 0)
-        pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
-        self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
-
-    def compute_reward(self):
-        reward = 0
-        done = 0
-
-        x, _, _ = self.current_pose
-
-        if self.is_collision():
-            done = 1
-            self.agent_traveled.append(x)
-
-        if done and self.eps_n % 5 == 0:
-            print("---------------------------------")
-            print("> Total episodes:", self.eps_n)
-            print(f"> Flight distance (mean): {np.mean(self.agent_traveled):.2f}")
-            print("> Holes reached (max):", int(np.max(self.agent_traveled) // 4))
-            print("> Holes reached (mean):", int(np.mean(self.agent_traveled) // 4))
-            print("---------------------------------\n")
-
-        return reward, done
