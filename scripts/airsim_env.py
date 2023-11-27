@@ -92,7 +92,13 @@ class AirSimDroneEnv(gym.Env):
 
         print(f"x : {start_x}, y: {start_y}")
 
-        start_pos = np.array(self.voxel.transform_coord((start_x, start_y, start_z)))
+        start_pos = np.array(
+            [
+                start_y + self.voxel.translate[0],
+                start_x + self.voxel.translate[1],
+                abs(self.voxel.translate[2]) - start_z,
+            ]
+        )
 
         relative_pos = np.random.uniform(low=2.0, high=4.0, size=3)
         goal_pos = start_pos + relative_pos

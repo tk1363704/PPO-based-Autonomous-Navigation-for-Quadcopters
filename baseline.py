@@ -7,6 +7,7 @@ import typer
 from typing_extensions import Annotated
 
 import gymnasium
+import numpy as np
 
 from scripts.airsim_env import TrainConfig
 from scripts.airsim_env import ActionType
@@ -85,13 +86,14 @@ def avoid(
     env.reset()
     gain = 1.0
     succ = 0
+    steps_per_trial = []
     for nt in range(num_trials):
         env.reset()
         goal = env.target_pos
         state = BaselineState.MOVE_UP
         max_error = 5.0
         height = -30
-        for _ in range(max_steps):
+        for curr_step in range(max_steps):
             current_pose = env.get_wrapper_attr("current_pose")
             if state == BaselineState.MOVE_UP:
                 goal_ = [current_pose[0], current_pose[1], height]
@@ -117,12 +119,18 @@ def avoid(
                     print("succesful!!")
                     succ += 1
                 env.reset()
-                break
+                steps_per_trial.append(curr_step)
 
-            print("delta_vel: ", velocity_desired)
-            print("Reward: ", reward)
-            print("done: ", done)
-            print("succ: ", succ, "num trials: ", nt)
+                print(
+                    "succ: ",
+                    succ,
+                    "num trials: ",
+                    nt,
+                    "avereage steps:",
+                    np.mean(steps_per_trial),
+                )
+
+                break
 
 
 @app.command()
@@ -150,10 +158,11 @@ def simple(
     env.reset()
     gain = 0.5
     succ = 0
+    steps_per_trial = []
     for nt in range(num_trials):
         env.reset()
         goal = env.target_pos
-        for _ in range(max_steps):
+        for curr_step in range(max_steps):
             current_pose = env.get_wrapper_attr("current_pose")
             velocity_desired = gain * (goal - current_pose)
             _, reward, done, _, _ = env.step(velocity_desired)
@@ -163,12 +172,18 @@ def simple(
                     print("succesful!!")
                     succ += 1
                 env.reset()
-                break
+                steps_per_trial.append(curr_step)
 
-            print("delta_vel: ", velocity_desired)
-            print("Reward: ", reward)
-            print("done: ", done)
-            print("succ: ", succ, "num trials: ", nt)
+                print(
+                    "succ: ",
+                    succ,
+                    "num trials: ",
+                    nt,
+                    "avereage steps:",
+                    np.mean(steps_per_trial),
+                )
+
+                break
 
 
 if __name__ == "__main__":
