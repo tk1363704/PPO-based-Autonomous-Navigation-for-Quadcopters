@@ -1,30 +1,18 @@
 from typing import Any, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
-
-# from pathlib import Path
+import random
 
 import gymnasium as gym
 import numpy as np
 from . import airsim
 
-# import binvox
-
-
-@dataclass
-class Section:
-    target: List[float]
-    offset: List[float]
-
+import binvox
+from .util import create_voxel_grid
 
 @dataclass
 class TrainConfig:
-    sections: List[Section]
-
-    def __post_init__(self):
-        if isinstance(self.sections[0], dict):
-            self.sections = [Section(**sec) for sec in self.sections]
-
+    binvox: str
 
 class ActionType(Enum):
     DISCRETE = 0
@@ -50,6 +38,12 @@ class AirSimDroneEnv(gym.Env):
         # output_path = Path.cwd() / "map.binvox"
         # self.drone.simCreateVoxelGrid(center, 100, 100, 100, 0.5, str(output_path))
         # vox = binvox.Binvox.read(output_path, "sparse").numpy()
+        voxel_path = env_config.binvox
+        
+        if (not voxel_path.exists()):
+            create_voxel_grid(voxel_path)
+            
+        self.voxel = binvox.Binvox.read(voxel_path, "sparse").numpy()
 
         self.observation_space = gym.spaces.Dict(
             {
@@ -93,6 +87,26 @@ class AirSimDroneEnv(gym.Env):
         self.steps = 0
         self.target_dist_prev = 0.0
         self.collision_time = -1
+
+    def sample_start_goal_pos(self):
+
+        indx = np.where(self.voxel == 0)
+        
+        # a = np.random.choice(indx, 
+
+        a = random.randint(0 , len(indx[0]))
+        start_x = indx[0][a]
+        start_y = indx[1][a]
+        start_z = indx[2][a]
+        print(f"x : {start_x}, y: {start_y}")
+
+        start_pos = np.array([start_y + self.map.translate[0] , start_x + self.map.translate[1], abs(self.map.translate[2]) - start_z])
+
+        # Set relative position and orientation wrt to the start, not 100% correct but can't be bothered
+        relative_pos = np.random.uniform(low=2.0, high=4.0, size=3)
+        goal_pos = start_pos + relative_pos
+        
+        return start_pos, goal_pos
 
     def step(self, action):
         self.drone.simPause(False)
