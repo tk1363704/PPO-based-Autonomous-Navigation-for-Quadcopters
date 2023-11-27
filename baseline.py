@@ -65,6 +65,7 @@ def avoid(
     ),
     sim_ip: Annotated[str, typer.Option()] = "127.0.0.1",
     max_steps: Annotated[int, typer.Option()] = 100,
+    num_trials: Annotated[int, typer.Option()] = 100,
 ):
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
@@ -84,13 +85,13 @@ def avoid(
     env.reset()
     gain = 1.0
     succ = 0
-    for nt in range(max_steps):
+    for nt in range(num_trials):
         env.reset()
         goal = env.target_pos
         state = BaselineState.MOVE_UP
         max_error = 5.0
         height = -30
-        for _ in range(200):
+        for _ in range(max_steps):
             current_pose = env.get_wrapper_attr("current_pose")
             if state == BaselineState.MOVE_UP:
                 goal_ = [current_pose[0], current_pose[1], height]
@@ -131,6 +132,7 @@ def simple(
     ),
     sim_ip: Annotated[str, typer.Option()] = "127.0.0.1",
     max_steps: Annotated[int, typer.Option()] = 100,
+    num_trials: Annotated[int, typer.Option()] = 100,
 ):
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
@@ -148,10 +150,10 @@ def simple(
     env.reset()
     gain = 0.5
     succ = 0
-    for nt in range(max_steps):
+    for nt in range(num_trials):
         env.reset()
         goal = env.target_pos
-        for _ in range(200):
+        for _ in range(max_steps):
             current_pose = env.get_wrapper_attr("current_pose")
             velocity_desired = gain * (goal - current_pose)
             _, reward, done, _, _ = env.step(velocity_desired)
