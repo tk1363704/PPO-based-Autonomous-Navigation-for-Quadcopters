@@ -1,18 +1,24 @@
-from typing import Any, List, Tuple
+from typing import Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
-import random
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
+import binvox
+
 from . import airsim
 
-import binvox
 from .util import create_voxel_grid
+
 
 @dataclass
 class TrainConfig:
-    binvox: str
+    binvox: Path
+
+    def __post_init__(self):
+        self.binvox = Path(self.binvox)
+
 
 class ActionType(Enum):
     DISCRETE = 0
@@ -27,23 +33,17 @@ class AirSimDroneEnv(gym.Env):
         action_type: ActionType,
         sim_dt: float,
     ):
-        self.sections = env_config.sections
-
         self.drone = airsim.MultirotorClient(ip=ip_address)
         rgb_shape = self.get_rgb_image().shape
 
         self.drone.simPause(True)
 
-        # center = airsim.Vector3r(0, 0, 0)
-        # output_path = Path.cwd() / "map.binvox"
-        # self.drone.simCreateVoxelGrid(center, 100, 100, 100, 0.5, str(output_path))
-        # vox = binvox.Binvox.read(output_path, "sparse").numpy()
         voxel_path = env_config.binvox
-        
-        if (not voxel_path.exists()):
+
+        if not voxel_path.exists():
             create_voxel_grid(voxel_path)
-            
-        self.voxel = binvox.Binvox.read(voxel_path, "sparse").numpy()
+
+        self.voxel = binvox.Binvox.read(str(voxel_path.absolute()), "dense")
 
         self.observation_space = gym.spaces.Dict(
             {
@@ -65,10 +65,6 @@ class AirSimDroneEnv(gym.Env):
             }
         )
 
-        # For instance, if you were working with a grid-world environment, these
-        # nine discrete actions might correspond to moving in different
-        # directions (e.g., up, down, left, right, or diagonally) or taking
-        # specific actions within the environment.
         self.action_type = action_type
         self.sim_dt = sim_dt
         if self.action_type == ActionType.DISCRETE:
@@ -89,23 +85,18 @@ class AirSimDroneEnv(gym.Env):
         self.collision_time = -1
 
     def sample_start_goal_pos(self):
+        indx = np.where(self.voxel.numpy() == 0)
 
-        indx = np.where(self.voxel == 0)
-        
-        # a = np.random.choice(indx, 
+        a = np.random.randint(len(indx[0]))
+        start_x, start_y, start_z = (arr[a] for arr in indx)
 
-        a = random.randint(0 , len(indx[0]))
-        start_x = indx[0][a]
-        start_y = indx[1][a]
-        start_z = indx[2][a]
         print(f"x : {start_x}, y: {start_y}")
 
-        start_pos = np.array([start_y + self.map.translate[0] , start_x + self.map.translate[1], abs(self.map.translate[2]) - start_z])
+        start_pos = np.array(self.voxel.transform_coord((start_x, start_y, start_z)))
 
-        # Set relative position and orientation wrt to the start, not 100% correct but can't be bothered
         relative_pos = np.random.uniform(low=2.0, high=4.0, size=3)
         goal_pos = start_pos + relative_pos
-        
+
         return start_pos, goal_pos
 
     def step(self, action):
@@ -148,13 +139,8 @@ class AirSimDroneEnv(gym.Env):
     def setup_flight(self):
         self.drone.reset()
         self.drone.enableApiControl(True)
-        # Arming a drone means preparing it for flight. When you arm a drone,
-        # you enable its propulsion system, allowing it to generate thrust and
-        # lift off the ground.
-        # Disarming a drone means shutting down its propulsion system and
-        # disabling its ability to generate thrust. This is typically done when
-        # you want to power down or land the drone safely.
-        # True to arm, False to disarm the vehicle
+
+        # Arming a drone means preparing it for flight.
         self.drone.armDisarm(True)
 
         # Prevent drone from falling after reset
@@ -163,15 +149,7 @@ class AirSimDroneEnv(gym.Env):
         # Get collision time stamp
         self.collision_time = self.drone.simGetCollisionInfo().time_stamp
 
-        # Get a random section
-        if self.random_start:
-            self.target_pos_idx = np.random.randint(len(self.sections))
-        else:
-            self.target_pos_idx = 0
-
-        section = self.sections[self.target_pos_idx]
-        self.agent_start_pos = np.array(section.offset, dtype=np.float64)
-        self.target_pos = np.array(section.target, dtype=np.float64)
+        self.agent_start_pos, self.target_pos = self.sample_start_goal_pos()
 
         print("-----------A new flight!------------")
         print(f"Start point is {self.agent_start_pos}")
@@ -179,26 +157,11 @@ class AirSimDroneEnv(gym.Env):
         print("-----------Start flying!------------")
         self.steps = 0
 
-        # # Start the agent at random section at a random yz position
-        # y_pos, z_pos = ((np.random.rand(1,2)-0.5)*2).squeeze()
-        # airsim.Pose: This is a class provided by the AirSim library for
-        # defining the pose of an object. A pose typically includes information
-        # about its position and orientation.
-        # airsim.Vector3r(self.agent_start_pos, y_pos, z_pos): This part creates
-        # a Vector3r object, which represents a 3D vector. It's used to specify
-        # the position of the object. self.agent_start_pos is likely a variable
-        # or value representing the x-coordinate, y_pos is the y-coordinate,
-        # and z_pos is the z-coordinate.
         pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
-        # Set the pose of the vehicle
-        self.drone.simSetVehiclePose(pose=pose, ignore_collision=False)
+        self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
+        self.drone.simPause(False)
+        self.drone.simPause(True)
 
-        # Get target distance for reward calculation
-        # This line of code calculates the Euclidean distance between two
-        # 2D points: [y_pos, z_pos] and self.target_pos
-        # self.target_dist_prev: This variable is assigned the computed distance
-        # value. It seems to be used to store the previous distance between the
-        # two points, possibly for tracking changes in distance over time.
         self.target_dist_prev = np.linalg.norm(self.agent_start_pos - self.target_pos)
         print(f"target_dist_prev: {self.target_dist_prev}")
 
@@ -223,57 +186,27 @@ class AirSimDroneEnv(gym.Env):
         else:
             vy, vz = (speed, speed)
 
-        # Execute action
-        # vx (float): desired velocity (X axis) in vehicle's local NED frame.
-        # vy (float): desired velocity (Y axis) in vehicle's local NED frame.
-        # vz (float): desired velocity (Z axis) in vehicle's local NED frame.
-        # duration (float): Desired amount of time (seconds), to send this command for
-        # call .join() to wait for method to finish.
         self.drone.moveByVelocityBodyFrameAsync(
             speed, vy, vz, duration=self.sim_dt
         ).join()
-        # Prevent swaying
-        # If you want to control the vehicle's velocity in its own body frame,
-        # use moveByVelocityBodyFrameAsync. If you prefer to control the
-        # velocity in a global reference frame
-        # (e.g., for navigation or waypoint following), use moveByVelocityAsync.
         self.drone.moveByVelocityAsync(vx=0, vy=0, vz=0, duration=1)
 
     def do_action_moving_x(self, select_action):
         speed = 0.4
         if select_action == 0:
             quad_offset = (speed, 0, 0)
-            # print('Left!!!')
         elif select_action == 1:
             quad_offset = (0, speed, 0)
-            # print('Forward!!!')
         elif select_action == 2:
             quad_offset = (0, 0, speed)
-            # print('Down!!!')
         elif select_action == 3:
             quad_offset = (-speed, 0, 0)
-            # print('Right!!!')
         elif select_action == 4:
             quad_offset = (0, -speed, 0)
-            # print('Back!!!')
         elif select_action == 5:
             quad_offset = (0, 0, -speed)
-            # print('Up!!!')
         else:
             quad_offset = (0, 0, 0)
-
-        # # Execute action
-        # # vx (float): desired velocity (X axis) vehicle's local NED frame.
-        # # vy (float): desired velocity (Y axis) vehicle's local NED frame.
-        # # vz (float): desired velocity (Z axis) vehicle's local NED frame.
-        # # duration (float): Desired amount of time (seconds), to send this command for
-        # # call .join() to wait for method to finish.
-        # # Prevent swaying
-        # # If you want to control the vehicle's velocity in its own body frame,
-        # use moveByVelocityBodyFrameAsync. If you prefer to control the
-        # velocity in a global reference frame
-        # e.g., for navigation or waypoint following), use moveByVelocityAsync.
-        # self.drone.moveByVelocityAsync(vx=0, vy=0, vz=0, duration=1)
 
         new_vel = self.current_vel + quad_offset
 
@@ -321,15 +254,9 @@ class AirSimDroneEnv(gym.Env):
         if self.steps % 10 == 0:
             print(f"Steps {self.steps} -> target_dist_prev: {self.target_dist_prev}")
 
-        # # Get meters agent traveled
-        # agent_traveled_x = np.abs(self.agent_start_pos - x)
-
         # Alignment reward
         if target_dist_curr < 0.30:
             reward += 12
-            # # Alignment becomes more important when agent is close to the hole
-            # if agent_traveled_x > 2.9:
-            #     reward += 7
 
         elif target_dist_curr < 0.45:
             reward += 7
@@ -339,11 +266,6 @@ class AirSimDroneEnv(gym.Env):
             print("The drone has collided with the obstacle!!!")
             reward = -100.0
             done = True
-
-        # # Check if agent passed through the hole
-        # elif agent_traveled_x > 3.7:
-        #     reward += 10
-        #     done = True
 
         elif target_dist_curr < 0.087:
             print("The drone has reached the target!!!")
@@ -356,26 +278,6 @@ class AirSimDroneEnv(gym.Env):
             reward = -100.0
             done = True
 
-        # elif target_dist_curr >= 50:
-        #     print("The drone has flown out of the specified range!!!")
-        #     reward += -50
-        #     done = True
-
-        # Check if the hole disappeared from camera frame
-        # (target_dist_curr-0.3) : distance between agent and hole's end point
-        # (3.7-agent_traveled_x) : distance between agent and wall
-        # (3.7-agent_traveled_x)*sin(60) : end points that camera can capture
-        # FOV : 120 deg, sin(60) ~ 1.732
-        # The condition being checked is:
-        # (target_dist_curr-0.3) > (3.7-agent_traveled_x)*1.732.
-        # It's comparing the distance between the agent and the hole's end point
-        # with the distance between the agent and the wall scaled by the FOV.
-        # If the condition is true, it means that the hole has "disappeared"
-        # from the camera frame because it's farther away than the camera's
-        # FOV can capture.
-        # elif (target_dist_curr-0.3) > (3.7-agent_traveled_x)*1.732:
-        #     reward = -100
-        #     done = True
         if done == 1 or self.steps % 10 == 0:
             print(f"Steps {self.steps} -> reward: {reward}, done: {done}")
         return reward, done
@@ -406,9 +308,6 @@ class AirSimDroneEnv(gym.Env):
 
     def get_rgb_image(self) -> np.ndarray:
         rgb_image_request = airsim.ImageRequest(0, airsim.ImageType.Scene, False, False)
-        # # camera control
-        # # simGetImage returns compressed png in array of bytes
-        # # image_type uses one of the ImageType members
         responses = self.drone.simGetImages([rgb_image_request])
         img1d = np.fromstring(  # type: ignore
             responses[0].image_data_uint8, dtype=np.uint8
