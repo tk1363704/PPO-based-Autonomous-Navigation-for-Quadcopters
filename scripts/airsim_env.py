@@ -44,6 +44,7 @@ class AirSimDroneEnv(gym.Env):
             create_voxel_grid(voxel_path)
 
         self.voxel = binvox.Binvox.read(str(voxel_path.absolute()), "dense")
+        self.voxel.data[:, :, :26] = True
 
         self.observation_space = gym.spaces.Dict(
             {
@@ -85,7 +86,8 @@ class AirSimDroneEnv(gym.Env):
         self.collision_time = -1
 
     def sample_start_goal_pos(self):
-        indx = np.where(self.voxel.numpy() == 0)
+        # pylint: disable=invalid-unary-operand-type
+        indx = np.where(~self.voxel.numpy())
 
         a = np.random.randint(len(indx[0]))
         start_x, start_y, start_z = (arr[a] for arr in indx)
@@ -94,14 +96,28 @@ class AirSimDroneEnv(gym.Env):
 
         start_pos = np.array(
             [
-                start_y + self.voxel.translate[0],
-                start_x + self.voxel.translate[1],
+                start_x + self.voxel.translate[0],
+                start_y + self.voxel.translate[1],
                 abs(self.voxel.translate[2]) - start_z,
             ]
         )
+        # Drone must start above ground (negative z)
+        assert start_pos[2] < 0
 
-        relative_pos = np.random.uniform(low=2.0, high=4.0, size=3)
-        goal_pos = start_pos + relative_pos
+        while True:
+            a = np.random.randint(len(indx[0]))
+            start_x, start_y, start_z = (arr[a] for arr in indx)
+
+            goal_pos = np.array(
+                [
+                    start_x + self.voxel.translate[0],
+                    start_y + self.voxel.translate[1],
+                    abs(self.voxel.translate[2]) - start_z,
+                ]
+            )
+
+            if np.linalg.norm(goal_pos - start_pos) < 10:
+                break
 
         return start_pos, goal_pos
 
