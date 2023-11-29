@@ -35,8 +35,11 @@ class AirSimDroneEnv(gym.Env):
 
         # Run this for the first time to create a voxel grid map. TODO: If map doesn't exist, run this
         # self.create_voxel_grid()
-
-        with open("/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/map2.binvox", 'rb') as f:
+        # Get the current directory
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        binvox_path = os.path.join(current_dir, '..', 'map2.binvox')
+        
+        with open(relative_path, 'rb') as f:
             self.map = binvox_rw.read_as_3d_array(f)        
 
         self.drone = airsim.MultirotorClient(ip=ip_address)
@@ -72,15 +75,17 @@ class AirSimDroneEnv(gym.Env):
         center = airsim.Vector3r(0, 0, 0)
         voxel_size = 100
         res = 1
+
         output_path = os.path.join(os.getcwd(), "map.binvox")
         client.simCreateVoxelGrid(center, 100, 100, 50, res, output_path)
         print("voxel map generated!")
 
-        with open("/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/map.binvox", 'rb') as f:
+        with open(output_path, 'rb') as f:
             map = binvox_rw.read_as_3d_array(f)   
         # Set every below ground level as "occupied". #TODO: add inflation to the map
         map.data[:,:,:26] = True
-        with open("/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/map_edited.binvox", 'wb') as f:
+        binvox_edited_path = os.path.join(os.getcwd(), "map_edited.binvox")
+        with open(binvox_edited_path, 'wb') as f:
             binvox_rw.write(map, f)
 
     def sample_start_goal_pos(self):
