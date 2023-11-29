@@ -39,7 +39,7 @@ class AirSimDroneEnv(gym.Env):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         binvox_path = os.path.join(current_dir, '..', 'map2.binvox')
         
-        with open(relative_path, 'rb') as f:
+        with open(binvox_path, 'rb') as f:
             self.map = binvox_rw.read_as_3d_array(f)        
 
         self.drone = airsim.MultirotorClient(ip=ip_address)
