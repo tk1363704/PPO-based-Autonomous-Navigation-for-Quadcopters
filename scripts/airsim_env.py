@@ -47,25 +47,14 @@ class AirSimDroneEnv(gym.Env):
         self.voxel = binvox.Binvox.read(str(voxel_path.absolute()), "dense")
         self.voxel.data[:, :, :26] = True
 
-        self.observation_space = gym.spaces.Dict(
-            {
-                "rgb_image": gym.spaces.Box(
-                    low=0, high=255, shape=rgb_shape, dtype=np.uint8
-                ),
-                "goal": gym.spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
-                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
-                ),
-                "target": gym.spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
-                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
-                ),
-                "relative_speed": gym.spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
-                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
-                ),
-            }
+        observation_space = OrderedDict()
+        observation_space["goal_obs"] = gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32
         )
+        observation_space["image_obs"] = gym.spaces.Box(
+            low=0, high=255, shape=rgb_shape, dtype=np.uint8
+        )
+        self.observation_space = gym.spaces.Dict(observation_space)
 
         self.action_type = action_type
         self.sim_dt = sim_dt
@@ -80,10 +69,10 @@ class AirSimDroneEnv(gym.Env):
             raise ValueError("Invalid Action Type!")
 
         self.random_start = True
-        self.setup_flight()
         self.steps = 0
         self.target_dist_prev = 0.0
         self.collision_time = -1
+        self.setup_flight()
 
     def sample_start_goal_pos(self):
         # pylint: disable=invalid-unary-operand-type
