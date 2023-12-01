@@ -128,7 +128,7 @@ class AirSimDroneEnv(gym.Env):
         return obs, reward, done, truncated, info
 
     def set_velocity(self, action):
-        action = np.clip(action, -1.0, 1.0)
+        action = np.clip(action, -1.0, 1.0).tolist()
         self.drone.moveByVelocityAsync(
             *action,
             duration=self.sim_dt,
@@ -285,7 +285,7 @@ class AirSimDroneEnv(gym.Env):
         img2d = np.reshape(img1d, (responses[0].height, responses[0].width, 3))
 
         img_rgb = np.flipud(img2d)
-        return img_rgb
+        return img_rgb.astype(np.uint8)
 
     def get_depth_image(self, thresh=2.0) -> np.ndarray:
         depth_image_request = airsim.ImageRequest(
@@ -324,4 +324,4 @@ class AirSimDroneEnv(gym.Env):
             ]
         ).as_matrix()
         global_to_local = local_to_global.T
-        return np.dot(global_to_local, v)
+        return np.dot(global_to_local, v).astype(np.float32)

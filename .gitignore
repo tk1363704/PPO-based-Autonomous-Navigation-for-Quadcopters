@@ -51,3 +51,4 @@ docs/_build/
 tb_logs/*
 .~lock.map.binvox#
 *.binvox
+wandb/*
