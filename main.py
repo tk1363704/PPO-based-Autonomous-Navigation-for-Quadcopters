@@ -14,7 +14,6 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.callbacks import EvalCallback
-import wandb
 
 from scripts.airsim_env import TrainConfig, ActionType
 
@@ -86,6 +85,7 @@ def train(
     sim_ip: Annotated[str, typer.Option()] = "127.0.0.1",
     train_timesteps: Annotated[int, typer.Option()] = 400000,
     seed: Annotated[int, typer.Option()] = 5,
+    use_wandb: Annotated[bool, typer.Option()] = False,
 ):
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
@@ -110,9 +110,6 @@ def train(
         tensorboard_log="./tb_logs/",
     )
 
-    wandb.init(project="drone_nav", entity="nahsen", sync_tensorboard=True)
-
-    callbacks = []
     eval_callback = EvalCallback(
         env,
         callback_on_new_best=None,
@@ -121,14 +118,22 @@ def train(
         log_path=".",
         eval_freq=5000,
     )
+    callbacks = [eval_callback]
 
-    callbacks.append(eval_callback)
-    kwargs = {}
-    kwargs["callback"] = callbacks
+    if use_wandb:
+        import wandb  # pylint: disable=import-outside-toplevel
+        from wandb.integration.sb3 import (  # pylint: disable=import-outside-toplevel
+            WandbCallback,
+        )
+
+        wandb.init(project="drone_nav", sync_tensorboard=True)  # type: ignore
+        callbacks.append(WandbCallback())
 
     log_name = "ppo_run_" + str(time.time())
 
-    model.learn(total_timesteps=train_timesteps, tb_log_name=log_name, **kwargs)
+    model.learn(
+        total_timesteps=train_timesteps, tb_log_name=log_name, callback=callbacks
+    )
 
     # Save policy weights
     model.save("ppo_navigation_policy")
