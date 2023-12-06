@@ -129,10 +129,17 @@ class AirSimDroneEnv(gym.Env):
 
     def set_velocity(self, action):
         action = np.clip(action, -1.0, 1.0).tolist()
-        self.drone.moveByVelocityAsync(
-            *action,
+        _action = [action[0], 0, action[2]]
+        a1 = self.drone.rotateByYawRateAsync(
+            action[1],
             duration=self.sim_dt,
-        ).join()
+        )
+        a2 = self.drone.moveByVelocityAsync(
+            *_action,
+            duration=self.sim_dt,
+        )
+        a1.join()
+        a2.join()
 
     def reset(
         self,
