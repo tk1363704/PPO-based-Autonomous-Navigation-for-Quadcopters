@@ -296,13 +296,22 @@ class AirSimDroneEnv(gym.Env):
 
     def get_depth_image(self, thresh=2.0) -> np.ndarray:
         depth_image_request = airsim.ImageRequest(
-            1, airsim.ImageType.DepthPerspective, True, False
+            0, airsim.ImageType.DepthPerspective, True, False
         )
         responses = self.drone.simGetImages([depth_image_request])
         depth_image = np.array(responses[0].image_data_float, dtype=np.float64)
         depth_image = np.reshape(depth_image, (responses[0].height, responses[0].width))
         depth_image[depth_image > thresh] = thresh
         return depth_image
+
+    def get_segment_image(self) -> np.ndarray:
+        segment_request = airsim.ImageRequest(
+            0, airsim.ImageType.Segmentation, True, False
+        )
+        response = self.drone.simGetImages([segment_request])
+        img1d = np.fromstring(response.image_data_uint8, dtype=np.uint8)
+        img_rgb = img1d.reshape(response.height, response.width, 3)
+        img_rgb = np.flipud(img_rgb)
 
     def global_to_local(self, pos):
         """

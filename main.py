@@ -127,7 +127,7 @@ def train(
         )
 
         wandb.init(project="drone_nav", sync_tensorboard=True)  # type: ignore
-        callbacks.append(WandbCallback())
+        callbacks.append(WandbCallback(verbose=2))
 
     log_name = "ppo_run_" + str(time.time())
 
