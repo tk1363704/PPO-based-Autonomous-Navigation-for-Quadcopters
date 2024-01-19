@@ -43,7 +43,7 @@ extension-pkg-whitelist=
 # Only show warnings with the listed confidence levels. Leave empty to show
 # all. Valid levels: HIGH, INFERENCE, INFERENCE_FAILURE, UNDEFINED
 confidence=
-
+disable=fixme
 [ELIF]
 
 # Maximum number of nested blocks for function / method body

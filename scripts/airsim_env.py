@@ -1,13 +1,16 @@
 from typing import Any, List, Tuple, Dict
 from dataclasses import dataclass
+
+from collections import OrderedDict
+import random
+import os
+
 import gymnasium as gym
 import numpy as np
-from collections import OrderedDict
-import os
-from . import airsim
-from scripts import binvox_rw
-import random
 from scipy.spatial.transform import Rotation as R
+
+from scripts import binvox_rw
+from . import airsim
 
 
 @dataclass
@@ -70,6 +73,8 @@ class AirSimDroneEnv(gym.Env):
         )
 
         self.random_start = True
+        self.agent_start_pos = None
+        self.target_pos = None
         # self.setup_flight()
         self.steps = 0
         self.target_dist_prev = 0.0
@@ -86,12 +91,12 @@ class AirSimDroneEnv(gym.Env):
         print("voxel map generated!")
 
         with open(output_path, "rb") as f:
-            map = binvox_rw.read_as_3d_array(f)
+            map_vox = binvox_rw.read_as_3d_array(f)
         # Set every below ground level as "occupied". #TODO: add inflation to the map
-        map.data[:, :, :26] = True
-        binvox_edited_path = os.path.join(os.getcwd(), "map_edited.binvox")
+        map_vox.data[:, :, :26] = True
+        binvox_edited_path = os.path.join(os.getcwd(), "map_vox_edited.binvox")
         with open(binvox_edited_path, "wb") as f:
-            binvox_rw.write(map, f)
+            binvox_rw.write(map_vox, f)
 
     def sample_start_goal_pos(self):
         indx = np.where(self.map.data == 0)
@@ -339,7 +344,7 @@ class AirSimDroneEnv(gym.Env):
         )
         try:
             img2d = np.reshape(img1d, (responses[0].height, responses[0].width, 3))
-        except:  # noqa: E722
+        except:  # noqa: E722 # pylint: disable=bare-except
             np.zeros((144, 256, 3))
 
         img_rgb = np.flipud(img2d)
@@ -383,40 +388,3 @@ class AirSimDroneEnv(gym.Env):
         ).as_matrix()
         global_to_local = local_to_global.T
         return np.dot(global_to_local, v)
-
-
-class TestEnv(AirSimDroneEnv):
-    def __init__(self, ip_address, env_config):
-        self.eps_n = 0
-        super().__init__(ip_address, env_config)
-        self.agent_traveled = []
-        self.random_start = False
-
-    def setup_flight(self):
-        super().setup_flight()
-        self.eps_n += 1
-
-        # Start the agent at a random yz position
-        # y_pos, z_pos = (0, 0)
-        pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
-        self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
-
-    def compute_reward(self):
-        reward = 0
-        done = 0
-
-        x, _, _ = self.current_pose
-
-        if self.is_collision():
-            done = 1
-            self.agent_traveled.append(x)
-
-        if done and self.eps_n % 5 == 0:
-            print("---------------------------------")
-            print("> Total episodes:", self.eps_n)
-            print(f"> Flight distance (mean): {np.mean(self.agent_traveled):.2f}")
-            print("> Holes reached (max):", int(np.max(self.agent_traveled) // 4))
-            print("> Holes reached (mean):", int(np.mean(self.agent_traveled) // 4))
-            print("---------------------------------\n")
-
-        return reward, done
