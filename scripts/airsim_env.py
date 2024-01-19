@@ -1,4 +1,4 @@
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Dict
 from dataclasses import dataclass
 import gymnasium as gym
 import numpy as np
@@ -8,7 +8,7 @@ from . import airsim
 from scripts import binvox_rw
 import random
 from scipy.spatial.transform import Rotation as R
-import pprint
+
 
 @dataclass
 class Section:
@@ -33,14 +33,14 @@ class AirSimDroneEnv(gym.Env):
     ):
         self.sections = env_config.sections
 
-        # Run this for the first time to create a voxel grid map. TODO: If map doesn't exist, run this
-        # self.create_voxel_grid()
+        # Run this for the first time to create a voxel grid map.
+        # TODO: If map doesn't exist, run this self.create_voxel_grid()
         # Get the current directory
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        binvox_path = os.path.join(current_dir, '..', 'map2.binvox')
-        
-        with open(binvox_path, 'rb') as f:
-            self.map = binvox_rw.read_as_3d_array(f)        
+        binvox_path = os.path.join(current_dir, "..", "map2.binvox")
+
+        with open(binvox_path, "rb") as f:
+            self.map = binvox_rw.read_as_3d_array(f)
 
         self.drone = airsim.MultirotorClient(ip=ip_address)
         rgb_shape = self.get_rgb_image().shape
@@ -53,67 +53,82 @@ class AirSimDroneEnv(gym.Env):
         # The space is image whose shape is (50, 50, 3) and value range is
         # [0, 255];
         observation_space = OrderedDict()
-        observation_space["goal_obs"] = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32)
-        observation_space["image_obs"] = gym.spaces.Box(low=0, high=255, shape=rgb_shape, dtype=np.uint8)
+        observation_space["goal_obs"] = gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32
+        )
+        observation_space["image_obs"] = gym.spaces.Box(
+            low=0, high=255, shape=rgb_shape, dtype=np.uint8
+        )
         self.observation_space = gym.spaces.Dict(observation_space)
 
         # For instance, if you were working with a grid-world environment, these
         # nine discrete actions might correspond to moving in different
         # directions (e.g., up, down, left, right, or diagonally) or taking
         # specific actions within the environment.
-        self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(3,), dtype=np.float32)
+        self.action_space = gym.spaces.Box(
+            low=-1.0, high=1.0, shape=(3,), dtype=np.float32
+        )
 
         self.random_start = True
-        #self.setup_flight()
+        # self.setup_flight()
         self.steps = 0
         self.target_dist_prev = 0.0
         self.collision_time = -1
 
     def create_voxel_grid(self):
-
         client = airsim.VehicleClient()
         center = airsim.Vector3r(0, 0, 0)
-        voxel_size = 100
+        # voxel_size = 100
         res = 1
 
         output_path = os.path.join(os.getcwd(), "map.binvox")
         client.simCreateVoxelGrid(center, 100, 100, 50, res, output_path)
         print("voxel map generated!")
 
-        with open(output_path, 'rb') as f:
-            map = binvox_rw.read_as_3d_array(f)   
+        with open(output_path, "rb") as f:
+            map = binvox_rw.read_as_3d_array(f)
         # Set every below ground level as "occupied". #TODO: add inflation to the map
-        map.data[:,:,:26] = True
+        map.data[:, :, :26] = True
         binvox_edited_path = os.path.join(os.getcwd(), "map_edited.binvox")
-        with open(binvox_edited_path, 'wb') as f:
+        with open(binvox_edited_path, "wb") as f:
             binvox_rw.write(map, f)
 
     def sample_start_goal_pos(self):
-
         indx = np.where(self.map.data == 0)
 
-        a = random.randint(0 , len(indx[0]))
+        a = random.randint(0, len(indx[0]))
         start_x = indx[0][a]
         start_y = indx[1][a]
         start_z = indx[2][a]
         print(f"x : {start_x}, y: {start_y}")
 
-        start_pos = [start_y + self.map.translate[0] , start_x + self.map.translate[1], abs(self.map.translate[2]) - start_z]
-        
-        # Set relative position and orientation wrt to the start, not 100% correct but can't be bothered
-        x = [-1,1][random.randrange(2)]
-        y = [-1,1][random.randrange(2)]
-        z = [-1,1][random.randrange(2)]
-        relative_pos = [x*random.uniform(2, 4),  y*random.uniform(2, 4), z*random.uniform(1, 2)] # TODO: need to sample a collision free pos from the map
-        goal_pos = [x + y for x, y in zip(start_pos, relative_pos)]
-        
-        asset_name = 'Sphere'
-        
-        scale = airsim.Vector3r(0.1, 0.1, 0.1)
-        desired_name = f"{asset_name}_spawn_{random.randint(0, 100)}"
-        pose = airsim.Pose(position_val=airsim.Vector3r(goal_pos[0], goal_pos[1], goal_pos[2]))
+        start_pos = [
+            start_y + self.map.translate[0],
+            start_x + self.map.translate[1],
+            abs(self.map.translate[2]) - start_z,
+        ]
 
-        # obj_name = self.drone.simSpawnObject(desired_name, asset_name, pose, scale, False)
+        # Set relative position and orientation wrt to the start
+        # not 100% correct but can't be bothered
+        x = [-1, 1][random.randrange(2)]
+        y = [-1, 1][random.randrange(2)]
+        z = [-1, 1][random.randrange(2)]
+        relative_pos = [
+            x * random.uniform(2, 4),
+            y * random.uniform(2, 4),
+            z * random.uniform(1, 2),
+        ]  # TODO: need to sample a collision free pos from the map
+        goal_pos = [x + y for x, y in zip(start_pos, relative_pos)]
+
+        # asset_name = "Sphere"
+
+        # scale = airsim.Vector3r(0.1, 0.1, 0.1)
+        # desired_name = f"{asset_name}_spawn_{random.randint(0, 100)}"
+        # pose = airsim.Pose(
+        #     position_val=airsim.Vector3r(goal_pos[0], goal_pos[1], goal_pos[2])
+        # )
+
+        # obj_name = self.drone.simSpawnObject(desired_name,asset_name,pose,scale,False)
 
         # print(f"Created object {obj_name} from asset {asset_name} "
         #     f"at pose {pose}, scale {scale}")
@@ -125,7 +140,7 @@ class AirSimDroneEnv(gym.Env):
         obs, info = self.get_obs()
         truncated = self.steps > 200
         reward, done, info = self.compute_reward(info)
-        
+
         return obs, reward, done, truncated, info
 
     def reset(
@@ -154,12 +169,12 @@ class AirSimDroneEnv(gym.Env):
         self.drone.armDisarm(True)
 
         # Prevent drone from falling after reset
-        #self.drone.takeoffAsync().join()
+        # self.drone.takeoffAsync().join()
         self.drone.moveToZAsync(-1, 1)
 
         # Get collision time stamp
         self.collision_time = self.drone.simGetCollisionInfo().time_stamp
-        
+
         start_pos, goal_pos = self.sample_start_goal_pos()
 
         self.agent_start_pos = np.array(start_pos, dtype=np.float64)
@@ -170,13 +185,13 @@ class AirSimDroneEnv(gym.Env):
         print(f"Target point is {self.target_pos}")
         print("-----------Start flying!------------")
         self.steps = 0
-        start_x_pos, start_y_pos, start_z_pos = (
-            float(self.agent_start_pos[0]),
-            float(self.agent_start_pos[1]),
-            float(self.agent_start_pos[2]),
-        )
+        # start_x_pos, start_y_pos, start_z_pos = (
+        #     float(self.agent_start_pos[0]),
+        #     float(self.agent_start_pos[1]),
+        #     float(self.agent_start_pos[2]),
+        # )
+        start_z_pos = float(self.agent_start_pos[2])
 
-        
         # # Start the agent at random section at a random yz position
         # y_pos, z_pos = ((np.random.rand(1,2)-0.5)*2).squeeze()
         # airsim.Pose: This is a class provided by the AirSim library for
@@ -190,10 +205,11 @@ class AirSimDroneEnv(gym.Env):
         pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
         # Set the pose of the vehicle
         self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
-        
+
         self.drone.moveToZAsync(start_z_pos, 10).join()
 
-        #self.drone.moveToPositionAsync(start_x_pos, start_y_pos, start_z_pos, 5).join()
+        # self.drone.moveToPositionAsync(start_x_pos,
+        # start_y_pos, start_z_pos, 5).join()
         # Get target distance for reward calculation
         # This line of code calculates the Euclidean distance between two
         # 2D points: [y_pos, z_pos] and self.target_pos
@@ -204,10 +220,11 @@ class AirSimDroneEnv(gym.Env):
         print(f"target_dist_prev: {self.target_dist_prev}")
 
     def do_action(self, action):
-
         # Execute action
         print(action)
-        self.drone.moveByVelocityBodyFrameAsync(float(action[0]), float(action[1]), float(action[2]), duration=0.1).join()
+        self.drone.moveByVelocityBodyFrameAsync(
+            float(action[0]), float(action[1]), float(action[2]), duration=0.1
+        ).join()
 
     def move_to_pos(self, goal):
         self.drone.moveToPositionAsync(*goal, velocity=1.5).join()
@@ -227,7 +244,7 @@ class AirSimDroneEnv(gym.Env):
         vel = self.drone.getMultirotorState().kinematics_estimated.linear_velocity
         return np.array([vel.x_val, vel.y_val, vel.z_val])
 
-    def compute_reward(self, info) -> Tuple[float, bool]:
+    def compute_reward(self, info) -> Tuple[float, bool, Dict[str, Any]]:
         reward = 0.0
         done = False
         self.steps += 1
@@ -235,14 +252,19 @@ class AirSimDroneEnv(gym.Env):
         info["is_collision"] = False
         info["timeout"] = False
 
-
         drone_pose = self.drone.simGetVehiclePose()
-        drone_pos = np.array([drone_pose.position.x_val, drone_pose.position.y_val, drone_pose.position.z_val])
+        drone_pos = np.array(
+            [
+                drone_pose.position.x_val,
+                drone_pose.position.y_val,
+                drone_pose.position.z_val,
+            ]
+        )
 
         # Target distance based reward
-        potential_reward_weight = 0.20 # TODO: add in config file
+        potential_reward_weight = 0.20  # TODO: add in config file
         target_dist_curr = float(np.linalg.norm(self.target_pos - drone_pos))
-        #print("target_dist_curr: ", target_dist_curr)
+        # print("target_dist_curr: ", target_dist_curr)
         reward += (self.target_dist_prev - target_dist_curr) * potential_reward_weight
 
         self.target_dist_prev = target_dist_curr
@@ -277,9 +299,9 @@ class AirSimDroneEnv(gym.Env):
             reward += -1
             done = True
 
-        if done == True or self.steps % 10 == 0:
+        if done or self.steps % 10 == 0:
             print(f"Steps {self.steps} -> reward: {reward}, done: {done}")
-        
+
         return reward, done, info
 
     def is_landing(self):
@@ -317,8 +339,8 @@ class AirSimDroneEnv(gym.Env):
         )
         try:
             img2d = np.reshape(img1d, (responses[0].height, responses[0].width, 3))
-        except:
-            np.zeros((144,256,3))
+        except:  # noqa: E722
+            np.zeros((144, 256, 3))
 
         img_rgb = np.flipud(img2d)
         return img_rgb
@@ -332,7 +354,7 @@ class AirSimDroneEnv(gym.Env):
         depth_image = np.reshape(depth_image, (responses[0].height, responses[0].width))
         depth_image[depth_image > thresh] = thresh
         return depth_image
-    
+
     def global_to_local(self, pos):
         """
         Convert a 3D point in global frame to agent's local frame
@@ -342,13 +364,26 @@ class AirSimDroneEnv(gym.Env):
         :return: the same 3D point in agent's local frame
         """
         drone_pose = self.drone.simGetVehiclePose()
-        drone_pos = np.array([drone_pose.position.x_val, drone_pose.position.y_val, drone_pose.position.z_val])
+        drone_pos = np.array(
+            [
+                drone_pose.position.x_val,
+                drone_pose.position.y_val,
+                drone_pose.position.z_val,
+            ]
+        )
         v = np.array(pos) - drone_pos
 
-        local_to_global = R.from_quat([drone_pose.orientation.x_val, drone_pose.orientation.y_val, 
-            drone_pose.orientation.z_val, drone_pose.orientation.w_val]).as_matrix()
+        local_to_global = R.from_quat(
+            [
+                drone_pose.orientation.x_val,
+                drone_pose.orientation.y_val,
+                drone_pose.orientation.z_val,
+                drone_pose.orientation.w_val,
+            ]
+        ).as_matrix()
         global_to_local = local_to_global.T
         return np.dot(global_to_local, v)
+
 
 class TestEnv(AirSimDroneEnv):
     def __init__(self, ip_address, env_config):

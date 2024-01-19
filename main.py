@@ -14,10 +14,9 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecTransposeImage
 from stable_baselines3.common.callbacks import EvalCallback
+import wandb
 
 from scripts.airsim_env import TrainConfig
-import numpy as np
-import wandb
 
 app = typer.Typer()
 
@@ -42,9 +41,7 @@ def evaluate(
         [
             lambda: Monitor(
                 gymnasium.make(
-                    "scripts:airsim-env-v0",
-                    ip_address=sim_ip,
-                    env_config=config
+                    "scripts:airsim-env-v0", ip_address=sim_ip, env_config=config
                 )
             )
         ]
@@ -54,7 +51,10 @@ def evaluate(
     env = VecTransposeImage(env)
 
     # Load an existing model
-    model = PPO.load(env=env, path="/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/best_model")
+    model = PPO.load(
+        env=env,
+        path="/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/best_model",
+    )
 
     num_success = 0
     num_timeout = 0
@@ -64,13 +64,13 @@ def evaluate(
         obs = env.reset()
         for _ in range(100):
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, done, info = env.step(action)
-            if done[0] == True:
-                if info[0]["is_success"] == True:
-                    num_success += 1 
-                if info[0]["is_collision"] == True:
-                    num_collision += 1 
-                if info[0]["timeout"] == True:
+            obs, _, done, info = env.step(action)
+            if done[0]:
+                if info[0]["is_success"]:
+                    num_success += 1
+                if info[0]["is_collision"]:
+                    num_collision += 1
+                if info[0]["timeout"]:
                     num_timeout += 1
 
     print(f"number of success = {num_success}")
@@ -129,9 +129,7 @@ def train(
     # # Wrap env as VecTransposeImage (Channel last to channel first)
     # env = VecTransposeImage(env)
 
-    env = gymnasium.make("scripts:airsim-env-v0",
-                    ip_address=sim_ip,
-                    env_config=config)
+    env = gymnasium.make("scripts:airsim-env-v0", ip_address=sim_ip, env_config=config)
     # Initialize PPO
     model = PPO(
         "MultiInputPolicy",
@@ -142,11 +140,8 @@ def train(
         tensorboard_log="./tb_logs/",
     )
 
-    wandb.init(project="drone_nav",
-                   entity="nahsen",
-                   sync_tensorboard=True
-                   )
-        
+    wandb.init(project="drone_nav", entity="nahsen", sync_tensorboard=True)
+
     # Evaluation callback
     # EvalCallback is a callback class commonly used in reinforcement learning
     # libraries like Stable Baselines to facilitate the evaluation of trained
@@ -174,25 +169,28 @@ def train(
     # Save policy weights
     model.save("ppo_navigation_policy")
 
+
 @app.command()
-def test(config_file: Annotated[Path, typer.Option()] = Path("/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/scripts/config.yml"),
-    sim_ip: Annotated[str, typer.Option()] = "127.0.0.1"
-    ):
+def test(
+    config_file: Annotated[Path, typer.Option()] = Path(
+        "/home/nick/Dev/AirSim/PPO-based-Autonomous-Navigation-for-Quadcopters/scripts/config.yml"
+    ),
+    sim_ip: Annotated[str, typer.Option()] = "127.0.0.1",
+):
     # Get train environment configs
     with open(config_file, "r", encoding="utf8") as f:
         env_config = yaml.safe_load(f)
         config = TrainConfig(**env_config["TrainEnv"])
 
-    env = gymnasium.make("scripts:airsim-env-v0",
-                    ip_address=sim_ip,
-                    env_config=config)
-    import time
-    for i in range(30):
+    env = gymnasium.make("scripts:airsim-env-v0", ip_address=sim_ip, env_config=config)
+
+    for _ in range(30):
         env.reset()
         env.step([0, 0, 1])
         time.sleep(5)
 
+
 if __name__ == "__main__":
-    # app()
-    evaluate()
-    #train()
+    app()
+    # evaluate()
+    # train()
