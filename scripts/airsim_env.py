@@ -1,23 +1,29 @@
-from typing import Any, List, Tuple
+from typing import Any, Tuple, Dict
 from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from collections import OrderedDict
+
 import gymnasium as gym
 import numpy as np
+import binvox
+from scipy.spatial.transform import Rotation as R
+
 from . import airsim
-
-
-@dataclass
-class Section:
-    target: List[float]
-    offset: List[float]
+from .util import create_voxel_grid
 
 
 @dataclass
 class TrainConfig:
-    sections: List[Section]
+    binvox: Path
 
     def __post_init__(self):
-        if isinstance(self.sections[0], dict):
-            self.sections = [Section(**sec) for sec in self.sections]
+        self.binvox = Path(self.binvox)
+
+
+class ActionType(Enum):
+    DISCRETE = 0
+    CONTINUOUS_VELOCITY = 1
 
 
 class AirSimDroneEnv(gym.Env):
@@ -25,52 +31,115 @@ class AirSimDroneEnv(gym.Env):
         self,
         ip_address: str,
         env_config: TrainConfig,
+        action_type: ActionType,
+        sim_dt: float,
     ):
-        self.sections = env_config.sections
-
         self.drone = airsim.MultirotorClient(ip=ip_address)
         rgb_shape = self.get_rgb_image().shape
 
-        self.observation_space = gym.spaces.Dict(
-            {
-                "rgb_image": gym.spaces.Box(
-                    low=0, high=255, shape=rgb_shape, dtype=np.uint8
-                ),
-                "goal": gym.spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
-                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
-                ),
-                "target": gym.spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
-                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
-                ),
-                "relative_speed": gym.spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -np.inf], dtype=np.float64),
-                    high=np.array([np.inf, np.inf, np.inf], dtype=np.float64),
-                ),
-            }
-        )
+        self.drone.simPause(True)
 
-        # For instance, if you were working with a grid-world environment, these
-        # nine discrete actions might correspond to moving in different
-        # directions (e.g., up, down, left, right, or diagonally) or taking
-        # specific actions within the environment.
-        self.action_space = gym.spaces.Discrete(7)
+        voxel_path = env_config.binvox
+
+        if not voxel_path.exists():
+            create_voxel_grid(voxel_path)
+
+        self.voxel = binvox.Binvox.read(str(voxel_path.absolute()), "dense")
+        self.voxel.data[:, :, :26] = True
+
+        observation_space = OrderedDict()
+        observation_space["goal_obs"] = gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(3,), dtype=np.float32
+        )
+        observation_space["image_obs"] = gym.spaces.Box(
+            low=0, high=255, shape=rgb_shape, dtype=np.uint8
+        )
+        self.observation_space = gym.spaces.Dict(observation_space)
+
+        self.action_type = action_type
+        self.sim_dt = sim_dt
+        if self.action_type == ActionType.DISCRETE:
+            self.action_space = gym.spaces.Discrete(7)
+        elif self.action_type == ActionType.CONTINUOUS_VELOCITY:
+            self.action_space = gym.spaces.Box(
+                np.array([-1.0, -1.0, -1.0], dtype=np.float32),
+                np.array([1.0, 1.0, 1.0], dtype=np.float32),
+            )
+        else:
+            raise ValueError("Invalid Action Type!")
 
         self.random_start = True
-        self.setup_flight()
-
         self.steps = 0
         self.target_dist_prev = 0.0
         self.collision_time = -1
+        self.setup_flight()
+
+    def sample_start_goal_pos(self):
+        # pylint: disable=invalid-unary-operand-type
+        indx = np.where(~self.voxel.numpy())
+
+        a = np.random.randint(len(indx[0]))
+        start_x, start_y, start_z = (arr[a] for arr in indx)
+
+        print(f"x : {start_x}, y: {start_y}")
+
+        start_pos = np.array(
+            [
+                start_x + self.voxel.translate[0],
+                start_y + self.voxel.translate[1],
+                abs(self.voxel.translate[2]) - start_z,
+            ]
+        )
+        # Drone must start above ground (negative z)
+        assert start_pos[2] < 0
+
+        while True:
+            a = np.random.randint(len(indx[0]))
+            start_x, start_y, start_z = (arr[a] for arr in indx)
+
+            goal_pos = np.array(
+                [
+                    start_x + self.voxel.translate[0],
+                    start_y + self.voxel.translate[1],
+                    abs(self.voxel.translate[2]) - start_z,
+                ]
+            )
+
+            if np.linalg.norm(goal_pos - start_pos) < 10:
+                break
+        return start_pos, goal_pos
 
     def step(self, action):
-        # self.do_action(action)
-        self.do_action_moving_x(action)
+        self.drone.simPause(False)
+
+        if self.action_type == ActionType.DISCRETE:
+            pass
+        elif self.action_type == ActionType.CONTINUOUS_VELOCITY:
+            self.set_velocity(action)
+        else:
+            raise ValueError("Invalid Action Type!")
+
+        self.drone.simPause(True)
+
         obs, info = self.get_obs()
-        reward, done = self.compute_reward()
         truncated = self.steps > 200
+        reward, done, info = self.compute_reward(info)
+
         return obs, reward, done, truncated, info
+
+    def set_velocity(self, action):
+        action = np.clip(action, -1.0, 1.0).tolist()
+        _action = [action[0], 0, action[2]]
+        a1 = self.drone.rotateByYawRateAsync(
+            action[1],
+            duration=self.sim_dt,
+        )
+        a2 = self.drone.moveByVelocityAsync(
+            *_action,
+            duration=self.sim_dt,
+        )
+        a1.join()
+        a2.join()
 
     def reset(
         self,
@@ -88,30 +157,18 @@ class AirSimDroneEnv(gym.Env):
     def setup_flight(self):
         self.drone.reset()
         self.drone.enableApiControl(True)
-        # Arming a drone means preparing it for flight. When you arm a drone,
-        # you enable its propulsion system, allowing it to generate thrust and
-        # lift off the ground.
-        # Disarming a drone means shutting down its propulsion system and
-        # disabling its ability to generate thrust. This is typically done when
-        # you want to power down or land the drone safely.
-        # True to arm, False to disarm the vehicle
+
+        # Arming a drone means preparing it for flight.
         self.drone.armDisarm(True)
 
         # Prevent drone from falling after reset
+        # self.drone.takeoffAsync().join()
         self.drone.moveToZAsync(-1, 1)
 
         # Get collision time stamp
         self.collision_time = self.drone.simGetCollisionInfo().time_stamp
 
-        # Get a random section
-        if self.random_start:
-            self.target_pos_idx = np.random.randint(len(self.sections))
-        else:
-            self.target_pos_idx = 0
-
-        section = self.sections[self.target_pos_idx]
-        self.agent_start_pos = np.array(section.offset, dtype=np.float64)
-        self.target_pos = np.array(section.target, dtype=np.float64)
+        self.agent_start_pos, self.target_pos = self.sample_start_goal_pos()
 
         print("-----------A new flight!------------")
         print(f"Start point is {self.agent_start_pos}")
@@ -119,204 +176,88 @@ class AirSimDroneEnv(gym.Env):
         print("-----------Start flying!------------")
         self.steps = 0
 
-        # # Start the agent at random section at a random yz position
-        # y_pos, z_pos = ((np.random.rand(1,2)-0.5)*2).squeeze()
-        # airsim.Pose: This is a class provided by the AirSim library for
-        # defining the pose of an object. A pose typically includes information
-        # about its position and orientation.
-        # airsim.Vector3r(self.agent_start_pos, y_pos, z_pos): This part creates
-        # a Vector3r object, which represents a 3D vector. It's used to specify
-        # the position of the object. self.agent_start_pos is likely a variable
-        # or value representing the x-coordinate, y_pos is the y-coordinate,
-        # and z_pos is the z-coordinate.
         pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
-        # Set the pose of the vehicle
-        self.drone.simSetVehiclePose(pose=pose, ignore_collision=False)
+        self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
+        self.drone.moveToZAsync(float(self.agent_start_pos[2]), 10).join()
+        self.drone.simPause(False)
+        self.drone.simPause(True)
 
-        # Get target distance for reward calculation
-        # This line of code calculates the Euclidean distance between two
-        # 2D points: [y_pos, z_pos] and self.target_pos
-        # self.target_dist_prev: This variable is assigned the computed distance
-        # value. It seems to be used to store the previous distance between the
-        # two points, possibly for tracking changes in distance over time.
-        self.target_dist_prev = np.linalg.norm(self.agent_start_pos - self.target_pos)
         print(f"target_dist_prev: {self.target_dist_prev}")
-
-    def do_action(self, select_action):
-        speed = 0.4
-        if select_action == 0:
-            vy, vz = (-speed, -speed)
-        elif select_action == 1:
-            vy, vz = (0, -speed)
-        elif select_action == 2:
-            vy, vz = (speed, -speed)
-        elif select_action == 3:
-            vy, vz = (-speed, 0)
-        elif select_action == 4:
-            vy, vz = (0, 0)
-        elif select_action == 5:
-            vy, vz = (speed, 0)
-        elif select_action == 6:
-            vy, vz = (-speed, speed)
-        elif select_action == 7:
-            vy, vz = (0, speed)
-        else:
-            vy, vz = (speed, speed)
-
-        # Execute action
-        # vx (float): desired velocity (X axis) in vehicle's local NED frame.
-        # vy (float): desired velocity (Y axis) in vehicle's local NED frame.
-        # vz (float): desired velocity (Z axis) in vehicle's local NED frame.
-        # duration (float): Desired amount of time (seconds), to send this command for
-        # call .join() to wait for method to finish.
-        self.drone.moveByVelocityBodyFrameAsync(speed, vy, vz, duration=1).join()
-        # Prevent swaying
-        # If you want to control the vehicle's velocity in its own body frame,
-        # use moveByVelocityBodyFrameAsync. If you prefer to control the
-        # velocity in a global reference frame
-        # (e.g., for navigation or waypoint following), use moveByVelocityAsync.
-        self.drone.moveByVelocityAsync(vx=0, vy=0, vz=0, duration=1)
-
-    def do_action_moving_x(self, select_action):
-        speed = 0.4
-        if select_action == 0:
-            quad_offset = (speed, 0, 0)
-            # print('Left!!!')
-        elif select_action == 1:
-            quad_offset = (0, speed, 0)
-            # print('Forward!!!')
-        elif select_action == 2:
-            quad_offset = (0, 0, speed)
-            # print('Down!!!')
-        elif select_action == 3:
-            quad_offset = (-speed, 0, 0)
-            # print('Right!!!')
-        elif select_action == 4:
-            quad_offset = (0, -speed, 0)
-            # print('Back!!!')
-        elif select_action == 5:
-            quad_offset = (0, 0, -speed)
-            # print('Up!!!')
-        else:
-            quad_offset = (0, 0, 0)
-
-        # # Execute action
-        # # vx (float): desired velocity (X axis) vehicle's local NED frame.
-        # # vy (float): desired velocity (Y axis) vehicle's local NED frame.
-        # # vz (float): desired velocity (Z axis) vehicle's local NED frame.
-        # # duration (float): Desired amount of time (seconds), to send this command for
-        # # call .join() to wait for method to finish.
-        # # Prevent swaying
-        # # If you want to control the vehicle's velocity in its own body frame,
-        # use moveByVelocityBodyFrameAsync. If you prefer to control the
-        # velocity in a global reference frame
-        # e.g., for navigation or waypoint following), use moveByVelocityAsync.
-        # self.drone.moveByVelocityAsync(vx=0, vy=0, vz=0, duration=1)
-
-        new_vel = self.current_vel + quad_offset
-
-        self.drone.moveByVelocityBodyFrameAsync(
-            *new_vel,
-            duration=0.03,
-        ).join()
-
-        # self.drone.step()
-
-    def move_to_pos(self, goal):
-        self.drone.moveToPositionAsync(*goal, velocity=1.5).join()
 
     def get_obs(self):
         info = {"collision": self.is_collision()}
-        obs = {
-            "rgb_image": self.get_rgb_image(),
-            "goal": self.target_pos,
-            "target": self.current_pose,
-            "relative_speed": self.current_vel,
-        }
-        return obs, info
 
-    @property
-    def current_pose(self):
-        x, y, z = self.drone.simGetVehiclePose().position
-        return np.array([x, y, z], dtype=np.float64)
+        obs = OrderedDict()
+        obs["image_obs"] = self.get_rgb_image()
+        goal_obs = self.global_to_local(self.target_pos)
+        obs["goal_obs"] = goal_obs
+
+        return obs, info
 
     @property
     def current_vel(self):
         vel = self.drone.getMultirotorState().kinematics_estimated.linear_velocity
         return np.array([vel.x_val, vel.y_val, vel.z_val])
 
-    def compute_reward(self) -> Tuple[float, bool]:
+    def compute_reward(self, info) -> Tuple[float, bool, Dict[str, Any]]:
         reward = 0.0
         done = False
         self.steps += 1
+        info["is_success"] = False
+        info["is_collision"] = False
+        info["timeout"] = False
+
+        drone_pose = self.drone.simGetVehiclePose()
+        drone_pos = np.array(
+            [
+                drone_pose.position.x_val,
+                drone_pose.position.y_val,
+                drone_pose.position.z_val,
+            ]
+        )
 
         # Target distance based reward
-        target_dist_curr = float(np.linalg.norm(self.current_pose - self.target_pos))
-        print("target_dist_curr: ", target_dist_curr)
-        reward += (self.target_dist_prev - target_dist_curr) * 20
+        potential_reward_weight = 0.20  # TODO: add in config file
+        target_dist_curr = float(np.linalg.norm(self.target_pos - drone_pos))
+        # print("target_dist_curr: ", target_dist_curr)
+        reward += (self.target_dist_prev - target_dist_curr) * potential_reward_weight
 
         self.target_dist_prev = target_dist_curr
-        if self.steps % 10 == 0:
-            print(f"Steps {self.steps} -> target_dist_prev: {self.target_dist_prev}")
 
-        # # Get meters agent traveled
-        # agent_traveled_x = np.abs(self.agent_start_pos - x)
+        # Goal reward
+        goal_threshold = 0.30
+        if target_dist_curr < goal_threshold:
+            reward += 1
+            done = True
+            info["is_success"] = True
 
-        # Alignment reward
-        if target_dist_curr < 0.30:
-            reward += 12
-            # # Alignment becomes more important when agent is close to the hole
-            # if agent_traveled_x > 2.9:
-            #     reward += 7
-
-        elif target_dist_curr < 0.45:
-            reward += 7
+        # Timestep reward
+        reward += -0.005
 
         # Collision penalty
         if self.is_collision():
             print("The drone has collided with the obstacle!!!")
-            reward = -100.0
+            reward += -1
+            info["is_collision"] = True
             done = True
-
-        # # Check if agent passed through the hole
-        # elif agent_traveled_x > 3.7:
-        #     reward += 10
-        #     done = True
-
-        elif target_dist_curr < 0.87:
-            print("The drone has reached the target!!!")
-            reward += 100
-            done = True
-
-        # Check if the drone's altitude is less than the landing threshold
         elif self.is_landing():
+            # Check if the drone's altitude is less than the landing threshold
             print("Drone has touched the ground!!!")
-            reward = -100.0
+            reward += -1
             done = True
-
         elif target_dist_curr >= 50:
             print("The drone has flown out of the specified range!!!")
-            reward += -50
+            reward += -1
+            done = True
+        elif self.steps > 100:
+            info["is_timeout"] = True
+            reward += -1
             done = True
 
-        # Check if the hole disappeared from camera frame
-        # (target_dist_curr-0.3) : distance between agent and hole's end point
-        # (3.7-agent_traveled_x) : distance between agent and wall
-        # (3.7-agent_traveled_x)*sin(60) : end points that camera can capture
-        # FOV : 120 deg, sin(60) ~ 1.732
-        # The condition being checked is:
-        # (target_dist_curr-0.3) > (3.7-agent_traveled_x)*1.732.
-        # It's comparing the distance between the agent and the hole's end point
-        # with the distance between the agent and the wall scaled by the FOV.
-        # If the condition is true, it means that the hole has "disappeared"
-        # from the camera frame because it's farther away than the camera's
-        # FOV can capture.
-        # elif (target_dist_curr-0.3) > (3.7-agent_traveled_x)*1.732:
-        #     reward = -100
-        #     done = True
-        if done == 1 or self.steps % 10 == 0:
+        if done or self.steps % 10 == 0:
             print(f"Steps {self.steps} -> reward: {reward}, done: {done}")
-        return reward, done
+
+        return reward, done, info
 
     def is_landing(self):
         # Set a threshold for how close the drone should be to the ground
@@ -344,20 +285,18 @@ class AirSimDroneEnv(gym.Env):
 
     def get_rgb_image(self) -> np.ndarray:
         rgb_image_request = airsim.ImageRequest(0, airsim.ImageType.Scene, False, False)
-        # # camera control
-        # # simGetImage returns compressed png in array of bytes
-        # # image_type uses one of the ImageType members
         responses = self.drone.simGetImages([rgb_image_request])
         img1d = np.fromstring(  # type: ignore
             responses[0].image_data_uint8, dtype=np.uint8
         )
         img2d = np.reshape(img1d, (responses[0].height, responses[0].width, 3))
+
         img_rgb = np.flipud(img2d)
-        return img_rgb
+        return img_rgb.astype(np.uint8)
 
     def get_depth_image(self, thresh=2.0) -> np.ndarray:
         depth_image_request = airsim.ImageRequest(
-            1, airsim.ImageType.DepthPerspective, True, False
+            0, airsim.ImageType.DepthPerspective, True, False
         )
         responses = self.drone.simGetImages([depth_image_request])
         depth_image = np.array(responses[0].image_data_float, dtype=np.float64)
@@ -365,39 +304,40 @@ class AirSimDroneEnv(gym.Env):
         depth_image[depth_image > thresh] = thresh
         return depth_image
 
+    def get_segment_image(self) -> np.ndarray:
+        segment_request = airsim.ImageRequest(
+            0, airsim.ImageType.Segmentation, True, False
+        )
+        response = self.drone.simGetImages([segment_request])
+        img1d = np.fromstring(response.image_data_uint8, dtype=np.uint8)
+        img_rgb = img1d.reshape(response.height, response.width, 3)
+        img_rgb = np.flipud(img_rgb)
 
-class TestEnv(AirSimDroneEnv):
-    def __init__(self, ip_address, env_config):
-        self.eps_n = 0
-        super().__init__(ip_address, env_config)
-        self.agent_traveled = []
-        self.random_start = False
+    def global_to_local(self, pos):
+        """
+        Convert a 3D point in global frame to agent's local frame
 
-    def setup_flight(self):
-        super().setup_flight()
-        self.eps_n += 1
+        :param env: environment instance
+        :param pos: a 3D point in global frame
+        :return: the same 3D point in agent's local frame
+        """
+        drone_pose = self.drone.simGetVehiclePose()
+        drone_pos = np.array(
+            [
+                drone_pose.position.x_val,
+                drone_pose.position.y_val,
+                drone_pose.position.z_val,
+            ]
+        )
+        v = np.array(pos) - drone_pos
 
-        # Start the agent at a random yz position
-        # y_pos, z_pos = (0, 0)
-        pose = airsim.Pose(airsim.Vector3r(*self.agent_start_pos))
-        self.drone.simSetVehiclePose(pose=pose, ignore_collision=True)
-
-    def compute_reward(self):
-        reward = 0
-        done = 0
-
-        x, _, _ = self.current_pose
-
-        if self.is_collision():
-            done = 1
-            self.agent_traveled.append(x)
-
-        if done and self.eps_n % 5 == 0:
-            print("---------------------------------")
-            print("> Total episodes:", self.eps_n)
-            print(f"> Flight distance (mean): {np.mean(self.agent_traveled):.2f}")
-            print("> Holes reached (max):", int(np.max(self.agent_traveled) // 4))
-            print("> Holes reached (mean):", int(np.mean(self.agent_traveled) // 4))
-            print("---------------------------------\n")
-
-        return reward, done
+        local_to_global = R.from_quat(
+            [
+                drone_pose.orientation.x_val,
+                drone_pose.orientation.y_val,
+                drone_pose.orientation.z_val,
+                drone_pose.orientation.w_val,
+            ]
+        ).as_matrix()
+        global_to_local = local_to_global.T
+        return np.dot(global_to_local, v).astype(np.float32)

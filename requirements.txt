@@ -1,5 +1,6 @@
 absl-py
 airsim
+binvox
 cachetools
 certifi
 charset-normalizer
@@ -30,6 +31,7 @@ PyYAML
 requests
 requests-oauthlib
 rsa
+scipy
 setuptools
 six
 stable-baselines3
@@ -41,5 +43,6 @@ tornado
 typing-extensions
 typer
 urllib3
+wandb
 Werkzeug
 wincertstore
