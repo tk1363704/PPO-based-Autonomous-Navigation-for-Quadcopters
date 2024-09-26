@@ -1,6 +1,6 @@
 from gymnasium.envs.registration import register
 
-from .airsim_env import AirSimDroneEnv, TestEnv  # noqa: F401
+from .airsim_env import AirSimDroneEnv  # noqa: F401
 
 # Register AirSim environment as a gym environment
 # register: This is a function provided by the Gym library, which is a toolkit
@@ -16,10 +16,4 @@ from .airsim_env import AirSimDroneEnv, TestEnv  # noqa: F401
 register(
     id="airsim-env-v0",
     entry_point="scripts:AirSimDroneEnv",
-)
-
-# Register AirSim environment as a gym environment
-register(
-    id="test-env-v0",
-    entry_point="scripts:TestEnv",
 )
